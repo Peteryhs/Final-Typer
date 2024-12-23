@@ -1,4 +1,4 @@
-![image](https://github.com/user-attachments/assets/a0111e84-10ce-44b2-935e-0e27dbf811f3)
+
 
 
 # Final Typer
@@ -90,6 +90,9 @@ A sophisticated text typing simulator with customizable typing patterns and real
 - Real-time statistics display
 - Simple/Advanced mode toggle
 - Intuitive controls
+
+### Images
+![image](https://github.com/user-attachments/assets/a0111e84-10ce-44b2-935e-0e27dbf811f3)
 
 ## Contributing
 
