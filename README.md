@@ -1,7 +1,7 @@
 
 
 
-# [Final Typer](https://cdn.lottielab.com/l/7kYzjqsH5FFd3R.html)
+# https://cdn.lottielab.com/l/7kYzjqsH5FFd3R.html
 
 A sophisticated text typing simulator with customizable typing patterns and realistic human-like behavior.
 
