@@ -105,7 +105,3 @@ Feel free to submit issues and enhancement requests!
 
 Developed by: Peteryhs
 
-
----
-
-*Note: Customize the repository URL, license, and other specific details according to your project.*
