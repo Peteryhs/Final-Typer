@@ -1,7 +1,7 @@
 
 
 
-# https://cdn.lottielab.com/l/7kYzjqsH5FFd3R.html
+# ![SceneAnalysis-2-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/1dd53cc5-7de4-4fa8-aad2-88285d903b4c)
 
 A sophisticated text typing simulator with customizable typing patterns and realistic human-like behavior.
 
@@ -17,7 +17,7 @@ A sophisticated text typing simulator with customizable typing patterns and real
   - Fatigue simulation
   - Smart pause timing
     
-    ![Recording2024-12-23135432-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/79b3ed93-ab5f-4b2c-a572-5e6927d3fcf0)
+   ![Recording2024-12-23135432-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/79b3ed93-ab5f-4b2c-a572-5e6927d3fcf0)
 
 - **Text Analysis**
   - Word count
