@@ -16,6 +16,8 @@ A sophisticated text typing simulator with customizable typing patterns and real
   - Realistic error patterns
   - Fatigue simulation
   - Smart pause timing
+    
+    ![Recording2024-12-23135432-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/79b3ed93-ab5f-4b2c-a572-5e6927d3fcf0)
 
 - **Text Analysis**
   - Word count
@@ -92,7 +94,8 @@ A sophisticated text typing simulator with customizable typing patterns and real
 - Intuitive controls
 
 ### Images
-![image](https://github.com/user-attachments/assets/a0111e84-10ce-44b2-935e-0e27dbf811f3)
+![image](https://github.com/user-attachments/assets/8e62d36c-7add-4ed5-b9e9-0d01db75f0de)
+
 
 ## Contributing
 
