@@ -1,4 +1,5 @@
 from cProfile import label
+from zipfile import error
 
 import pyautogui
 import time
@@ -7,7 +8,9 @@ import re
 from collections import Counter
 import customtkinter
 import tkinter
+import os
 
+#Text stats
 def text_analysis(text):
     if not text:
         return {
@@ -44,6 +47,7 @@ def text_analysis(text):
         "sentence_count": sentence_count
     }
 
+#Mistake stats
 def mistake_analysis(speed, text_analysis_results):
     base_rate = (float(speed) / 200) * 0.05
     word_complexity = text_analysis_results["average_word_length"] / 5
@@ -55,7 +59,7 @@ def mistake_analysis(speed, text_analysis_results):
     mistake_rate = base_rate * (word_complexity + vocabulary_complexity + letter_difficulty) / 10
     return mistake_rate
 
-
+#Typing simulation
 def simulate_typing(text, typing_speed, analysis_results, mistake_rate, fatigue_mode):
     print(f"Error rate: {mistake_rate}, Fatigue mode: {fatigue_mode}, Typing speed: {typing_speed}")
     base_delay = (60 / (typing_speed * 7)) *0.5
@@ -81,6 +85,7 @@ def simulate_typing(text, typing_speed, analysis_results, mistake_rate, fatigue_
         frequency_factor = 1.5 if word.lower() not in analysis_results["word_frequency"] else 1.0
         return word_length_factor * frequency_factor
 
+    #Common words = faster typing
     def get_nearby_key(char):
         keyboard_layout = {
             'q': 'wa', 'w': 'qeasd', 'e': 'wrsdf', 'r': 'etdfg', 't': 'ryfgh',
@@ -118,6 +123,7 @@ def simulate_typing(text, typing_speed, analysis_results, mistake_rate, fatigue_
         mistake_type = random.choices(list(mistake_types.keys()), weights=weights)[0]
         return mistake_types[mistake_type](char)
 
+    #Thinking
     def natural_pause(word):
         if word.endswith((".", "!", "?")):
             return random.uniform(0.8, 2.5)
@@ -130,6 +136,7 @@ def simulate_typing(text, typing_speed, analysis_results, mistake_rate, fatigue_
         return random.uniform(0.00001, 0.00005)
 
     def safe_write(char):
+        #why can't pyautogui tell the difference between ' and ’
         if char == '“':
             pyautogui.write('"')
         elif char == '”':
@@ -217,10 +224,12 @@ def config_setting(choice):
         advanced_frame.grid(row = 4, column = 1, padx = 20, sticky = "ews")
         simple_frame.grid_forget()
 
-
+#GUI Code order reformatted by O1
 app = customtkinter.CTk()
 app.geometry("1000x600")
 app.title("Final Typer")
+
+
 
 # Configure grid layout for the app window
 app.columnconfigure(0, weight=0)
@@ -235,21 +244,16 @@ side_frame.columnconfigure(0, weight=1)
 
 # Widgets in side_frame
 name = customtkinter.CTkLabel(
-    side_frame, text="Final Typer", font=("Arial", 30), text_color="#f0f0f0"
-)
+    side_frame, text="Final Typer", font=("Arial", 30), text_color="#f0f0f0")
 credits = customtkinter.CTkLabel(
-    side_frame, text="Developed by: Peteryhs", font=("Arial", 15), text_color="#f0f0f0"
-)
+    side_frame, text="Version 1.2.0", font=("Arial", 15), text_color="#f0f0f0")
 theme_menu = customtkinter.CTkOptionMenu(
-    side_frame, values=["Dark", "Light"], command = change_theme
-)
+    side_frame, values=["Dark", "Light"], command = change_theme)
 text_stats = customtkinter.CTkLabel(
-    side_frame, text="Text Stats", font=("Arial", 15), text_color="#f0f0f0"
-)
+    side_frame, text="Text Stats", font=("Arial", 15), text_color="#f0f0f0")
 statsframe = customtkinter.CTkFrame(side_frame, border_width=1, border_color="#f0f0f0")
 stats_content = customtkinter.CTkLabel(
-    statsframe, text="", font=("Arial", 12),  anchor="w", justify="left"
-)
+    statsframe, text="", font=("Arial", 12),  anchor="w", justify="left")
 
 # Place widgets in side_frame
 name.grid(row=0, column=0, padx=20, pady=(50, 10))
@@ -273,11 +277,12 @@ main_frame.rowconfigure(3, weight=0)
 textinput = customtkinter.CTkTextbox(main_frame)
 textinput.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="nswe")
 
+
 # Configuration Mode Switch
 config_mode = customtkinter.CTkSegmentedButton(
-    main_frame, values=["Simple", "Advanced"]
-)
-config_mode.set("Simple")
+    main_frame, values=["Simple", "Advanced"])
+
+
 config_mode.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
 
 # Simple Mode Frame
@@ -302,7 +307,9 @@ wpm_entry_advanced = customtkinter.CTkEntry(
     advanced_frame, placeholder_text="WPM", width=100, textvariable=wpm_advanced
 )
 advanced_label = customtkinter.CTkLabel(advanced_frame, text="WPM")
-error_rate_entry = customtkinter.CTkEntry(advanced_frame, width=100)
+error_rate = tkinter.StringVar()
+error_rate_entry = customtkinter.CTkEntry(advanced_frame, width=100, textvariable=error_rate)
+
 error_label = customtkinter.CTkLabel(advanced_frame, text="Error rate")
 fatigue_var = tkinter.IntVar()
 fatigue_checkbox = customtkinter.CTkCheckBox(
@@ -327,7 +334,8 @@ def config_setting(mode):
         advanced_frame.grid(row=2, column=0, padx=20, pady=10, sticky="ew")
 
 config_mode.configure(command=config_setting)
-config_setting("Simple")
+
+
 
 
 def update_slider_label(value):
@@ -359,20 +367,76 @@ def display_stats():
     stats_content.configure(text=stats_text)
 
 def trigger_typing():
-    time.sleep(3)
+
+
+
     text = textinput.get("1.0", "end-1c")
     speed = wpm_simple.get() if config_mode.get() == "Simple" else float(wpm_advanced.get())
     analysis_results = text_analysis(text)
+
     if config_mode.get() == "Advanced":
-        mistake_rate = float(error_rate_entry.get()) / 100
+        print(error_rate)
+        mistake_rate = float(error_rate.get()) / 100
     else:
         mistake_rate = mistake_analysis(speed, analysis_results)
-
+    time.sleep(3)
     simulate_typing(text, speed, analysis_results, mistake_rate, fatigue_var.get())
+
 
 
 stats_button.configure(command=display_stats)
 begin_button.configure(command=trigger_typing)
 
+# Load user data
+if os.path.exists('data.txt'):
+    data = {}
+    with open('data.txt', 'r') as file:
+        for line in file:
+            key, value = line.split(':')
+            data[key] = value
+    print(data['Mode'])
+    if data['Mode'] == ' Simple\n':
+        print("Ok")
+        config_mode.set("Simple")
+        config_setting("Simple")
+        wpm_simple.set(int(data['Speed']))
+        simple_slider_label.configure(text=f"WPM: {wpm_simple.get()}")
+    else:
+        print("not ok")
+        config_mode.set("Advanced")
+        config_setting("Advanced")
+        wpm_advanced.set(data['Speed'])
+        error_rate.set(data['Error'])
+        fatigue_var.set(int(data['Fatigue']))
+
+
+else:
+    config_mode.set("Simple")
+    config_setting("Simple")
+
+#Save user data
+def save_data():
+    speed = wpm_simple.get() if config_mode.get() == "Simple" else float(wpm_advanced.get())
+    mode = config_mode.get()
+    fatigue = fatigue_var.get()
+    if config_mode.get() == "Advanced":
+        error = error_rate.get()
+    else:
+
+        if textinput.get("1.0", "end-1c") == '' or textinput.get("1.0", "end-1c") == ' ':
+            error = 0
+        else:
+            error = mistake_analysis(speed, text_analysis(text))
+
+    with open('data.txt', 'w') as file:
+        file.write(f"Speed: {speed}\nMode: {mode}\nFatigue: {fatigue}\nError: {error}")
+
+
+def on_closing():
+    save_data()
+    app.destroy()
+
+
+app.protocol("WM_DELETE_WINDOW", on_closing)
 
 app.mainloop()
