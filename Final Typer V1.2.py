@@ -229,8 +229,6 @@ app = customtkinter.CTk()
 app.geometry("1000x600")
 app.title("Final Typer")
 
-
-
 # Configure grid layout for the app window
 app.columnconfigure(0, weight=0)
 app.columnconfigure(1, weight=1)
@@ -336,8 +334,6 @@ def config_setting(mode):
 config_mode.configure(command=config_setting)
 
 
-
-
 def update_slider_label(value):
     simple_slider_label.configure(text=f"WPM: {int(float(value))}")
 
@@ -416,6 +412,7 @@ else:
 
 #Save user data
 def save_data():
+    text = textinput.get("1.0", "end-1c")
     speed = wpm_simple.get() if config_mode.get() == "Simple" else float(wpm_advanced.get())
     mode = config_mode.get()
     fatigue = fatigue_var.get()
