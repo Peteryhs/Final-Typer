@@ -31,6 +31,7 @@ A sophisticated text typing simulator with customizable typing patterns and real
   - Dark/Light theme support
   - Real-time statistics
   - User-friendly GUI
+  - **Auto saves user preferences** 
 
 ## Requirements
 
