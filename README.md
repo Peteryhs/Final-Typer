@@ -1,4 +1,5 @@
-# Final Typer (Electron)
+
+# ![FT-1-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/e19e7746-0dde-488d-8083-7264d933b4b9)
 
 ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
 ![Electron](https://img.shields.io/badge/Electron-191970?style=for-the-badge&logo=Electron&logoColor=white)
