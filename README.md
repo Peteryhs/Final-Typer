@@ -42,7 +42,7 @@ A modern, highly configurable typing simulation engine built with Electron, Reac
 
 1.  **Clone the repository** (if you haven't already):
     ```bash
-    git clone <repository-url>
+    git clone https://github.com/Peteryhs/Final-Typer
     cd final-typer-electron/electron-app
     ```
 
@@ -73,6 +73,10 @@ This will generate an installer in the `dist/` directory.
 3.  Choose your mode (**Smart** or **Custom**) and adjust parameters.
 4.  Click **Start Engine** to begin the simulation.
 5.  Focus on the target window where you want the typing to occur (if applicable, or watch the simulation in-app).
+
+## Images
+<img width="1754" height="1234" alt="image" src="https://github.com/user-attachments/assets/60bed08e-fce7-4d88-9720-add7e43e7554" />
+
 
 ## License
 
