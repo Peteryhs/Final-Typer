@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on tcp:5173 && tsc -p tsconfig.node.json && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\""
   },
-  "dependencies": {
+  "build": { "appId": "com.peter.finaltyper", "productName": "Final Typer", "files": ["dist/**/*", "dist-electron/**/*", "package.json"], "directories": { "output": "release" }, "win": { "target": "nsis" } }, "dependencies": {
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.5",
