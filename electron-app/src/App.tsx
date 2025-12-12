@@ -1,0 +1,760 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  ThemeProvider, createTheme, CssBaseline,
+  Box, Drawer, ListItemButton, ListItemIcon,
+  Typography, IconButton, Button, TextField,
+  Paper, Divider, Stack,
+  CircularProgress, Tooltip, Grid
+} from '@mui/material';
+import {
+  PlayArrow, Stop, TextFields,
+  Settings, ContentPaste, Delete,
+  FlashOn, Palette, Monitor,
+  DarkMode, LightMode, OpenInFull
+} from '@mui/icons-material';
+import { textAnalysis, TextAnalysisResult } from './lib/analysis';
+import { motion, AnimatePresence } from 'framer-motion';
+import TitleBar from './components/TitleBar';
+import ConfigPanel from './components/ConfigPanel';
+
+// Hook for local storage persistence
+function useStickyState<T>(defaultValue: T, key: string): [T, React.Dispatch<React.SetStateAction<T>>] {
+  const [value, setValue] = useState<T>(() => {
+    const stickyValue = localStorage.getItem(key);
+    return stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
+  });
+  useEffect(() => {
+    localStorage.setItem(key, JSON.stringify(value));
+  }, [key, value]);
+  return [value, setValue];
+}
+
+// Color Palettes Definition
+const colorPalettes: Record<string, {
+  light: { primary: string; secondary: string; background: string; surface: string };
+  dark: { primary: string; secondary: string; background: string; surface: string };
+}> = {
+  violet: {
+    light: { primary: '#6750A4', secondary: '#625B71', background: '#FDF8FD', surface: '#F3EDF7' },
+    dark: { primary: '#D0BCFF', secondary: '#CCC2DC', background: '#141218', surface: '#1D1B20' }
+  },
+  blue: {
+    light: { primary: '#0061A4', secondary: '#535F70', background: '#FDFCFF', surface: '#E1E7EC' },
+    dark: { primary: '#A8C7FA', secondary: '#D6E3FF', background: '#121619', surface: '#1A2026' } // Slate Blue Tint
+  },
+  green: {
+    light: { primary: '#206C2F', secondary: '#526350', background: '#FCFDF6', surface: '#E0E6DE' },
+    dark: { primary: '#8CD699', secondary: '#BCCBBF', background: '#0E1510', surface: '#19211B' } // Deep Green Tint
+  },
+  orange: {
+    light: { primary: '#8B5000', secondary: '#6F5B40', background: '#FFF8F1', surface: '#F0E0CF' },
+    dark: { primary: '#FFB74D', secondary: '#DDC2A1', background: '#18120C', surface: '#241E18' } // Deep Orange/Brown Tint
+  }
+};
+
+// --- OVERLAY COMPONENT ---
+function OverlayMode() {
+  const [isTyping, setIsTyping] = useState(false);
+
+  const handleToggle = async () => {
+    if (isTyping) {
+      window.electronAPI.stopTyping();
+      setIsTyping(false);
+    } else {
+      setIsTyping(true);
+      try {
+        await window.electronAPI.signalStart();
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setIsTyping(false);
+      }
+    }
+  };
+
+  return (
+    <Box
+      sx={{
+        width: '100vw', height: '100vh',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        bgcolor: 'rgba(0,0,0,0)' // Transparent body
+      }}
+    >
+      <Paper
+        component={motion.div}
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: "spring", stiffness: 300, damping: 20 }}
+        elevation={6}
+        sx={{
+          width: '100%', height: '100%',
+          bgcolor: 'rgba(28, 27, 31, 0.9)',
+          backdropFilter: 'blur(10px)',
+          borderRadius: 0,
+          border: '1px solid rgba(255,255,255,0.1)',
+          display: 'flex', flexDirection: 'row', alignItems: 'center', px: 2, gap: 2,
+          // DRAG REGION
+          WebkitAppRegion: 'drag',
+          '& button': { WebkitAppRegion: 'no-drag' }
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 'auto' }}>
+          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: isTyping ? 'success.main' : 'warning.main', boxShadow: isTyping ? '0 0 8px #66bb6a' : 'none' }} />
+          <Typography variant="caption" fontWeight={700} color="text.secondary">FINAL TYPER</Typography>
+        </Box>
+
+        <IconButton
+          onClick={handleToggle}
+          color={isTyping ? "error" : "primary"}
+          sx={{ bgcolor: 'rgba(255,255,255,0.05)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
+        >
+          {isTyping ? <Stop /> : <PlayArrow />}
+        </IconButton>
+
+        <IconButton
+          size="small"
+          onClick={() => window.electronAPI.toggleOverlay()}
+          sx={{ color: 'text.secondary' }}
+        >
+          <OpenInFull fontSize="small" />
+        </IconButton>
+      </Paper>
+    </Box>
+  );
+}
+
+// --- MAIN APP ---
+function App() {
+  // Check mode
+  const isOverlay = new URLSearchParams(window.location.search).get('mode') === 'overlay';
+
+  const [text, setText] = useStickyState('', 'ft_text');
+  const [speed, setSpeed] = useStickyState(65, 'ft_speed');
+  const [speedMode, setSpeedMode] = useStickyState<'constant' | 'dynamic'>('constant', 'ft_speed_mode');
+  const [speedVariance, setSpeedVariance] = useStickyState(0.2, 'ft_speed_variance');
+  const [mistakeRatePercent, setMistakeRatePercent] = useStickyState(5, 'ft_mistake');
+  const [fatigueMode, setFatigueMode] = useStickyState(true, 'ft_fatigue');
+
+  // Theme State
+  const [seedColor, setSeedColor] = useStickyState('violet', 'ft_theme_seed');
+  const [mode, setMode] = useStickyState<'light' | 'dark'>('dark', 'ft_theme_mode');
+
+  // Config Mode State
+  const [configMode, setConfigMode] = useStickyState<'smart' | 'custom'>('smart', 'ft_config_mode');
+  const [targetMinutes, setTargetMinutes] = useStickyState(5, 'ft_smart_min');
+  const [targetSeconds, setTargetSeconds] = useStickyState(0, 'ft_smart_sec');
+
+  // Advanced State
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [realizationSensitivity, setRealizationSensitivity] = useStickyState(0.15, 'ft_adv_realization');
+  const [reflexRate, setReflexRate] = useStickyState(0.05, 'ft_adv_reflex');
+  const [backspaceSpeed, setBackspaceSpeed] = useStickyState(0.06, 'ft_adv_backspace');
+  const [pauseScale, setPauseScale] = useStickyState(1.0, 'ft_adv_pause');
+  const [burstLength, setBurstLength] = useStickyState(4, 'ft_adv_burst');
+  const [misalignmentChance, setMisalignmentChance] = useStickyState(0.15, 'ft_adv_misalign');
+  const [dynamicMistakes, setDynamicMistakes] = useStickyState(true, 'ft_adv_dynamic_mistakes');
+
+  const [stats, setStats] = useState<TextAnalysisResult | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [activeTab, setActiveTab] = useState<'write' | 'settings'>('write');
+  const [countdown, setCountdown] = useState<number | null>(null);
+
+  useEffect(() => {
+    const res = textAnalysis(text);
+    setStats(res);
+  }, [text]);
+
+  // Smart Mode Speed Calculation
+  useEffect(() => {
+    if (configMode === 'smart' && stats && stats.word_count > 0) {
+      const totalSeconds = (targetMinutes * 60) + targetSeconds;
+      if (totalSeconds > 0) {
+        // Speed = Words / Minutes
+        const calculatedSpeed = Math.round(stats.word_count / (totalSeconds / 60));
+        // Clamp reasonably
+        const safeSpeed = Math.max(10, Math.min(calculatedSpeed, 999));
+        setSpeed(safeSpeed);
+        setSpeedMode('dynamic'); // Smart implies dynamic/natural usually, or we can enforce it
+        setSpeedVariance(0.15); // Default natural variance for smart mode
+      }
+    }
+  }, [configMode, stats, targetMinutes, targetSeconds, setSpeed, setSpeedMode, setSpeedVariance]);
+
+  const theme = useMemo(() => {
+    const palette = colorPalettes[seedColor][mode];
+    // Force Dark mode for Overlay to look cool/unobtrusive
+    const appliedMode = isOverlay ? 'dark' : mode;
+    const appliedPalette = isOverlay ? colorPalettes[seedColor].dark : palette;
+
+    return createTheme({
+      palette: {
+        mode: appliedMode,
+        primary: { main: appliedPalette.primary },
+        secondary: { main: appliedPalette.secondary },
+        background: { default: appliedPalette.background, paper: appliedPalette.surface },
+      },
+      typography: {
+        fontFamily: '"Roboto Flex", "Inter", "Roboto", "Helvetica", "Arial", sans-serif',
+        h1: { fontSize: '2rem', fontWeight: 400, lineHeight: 1.2 },
+        h2: { fontSize: '1.5rem', fontWeight: 400 },
+        subtitle1: { fontSize: '1.125rem', fontWeight: 500 },
+        body1: { fontSize: '1rem', letterSpacing: 0.15 },
+        body2: { fontSize: '0.875rem', letterSpacing: 0.25 },
+        button: { textTransform: 'none', fontWeight: 500, letterSpacing: 0.1 },
+      },
+      shape: { borderRadius: 16 },
+      components: {
+        MuiButton: {
+          styleOverrides: {
+            root: { borderRadius: 100, padding: '10px 24px' },
+            contained: { boxShadow: 'none', '&:hover': { boxShadow: '0px 1px 3px 1px rgba(0, 0, 0, 0.15)' } },
+            outlined: { borderColor: appliedMode === 'dark' ? '#938F99' : '#79747E' }
+          },
+        },
+        MuiPaper: {
+          styleOverrides: {
+            root: { backgroundImage: 'none' },
+            rounded: { borderRadius: 16 },
+            outlined: { borderColor: appliedMode === 'dark' ? '#49454F' : '#79747E', background: 'transparent' },
+          },
+        },
+        MuiDrawer: {
+          styleOverrides: {
+            paper: { backgroundColor: appliedPalette.background, borderRight: 'none' }
+          }
+        },
+        MuiListItemButton: { styleOverrides: { root: { borderRadius: 100 } } },
+        MuiSwitch: {
+          styleOverrides: {
+            root: { width: 52, height: 32, padding: 0 },
+            switchBase: {
+              padding: 4,
+              '&.Mui-checked': {
+                transform: 'translateX(20px)',
+                color: '#fff',
+                '& + .MuiSwitch-track': { opacity: 1, backgroundColor: appliedPalette.primary },
+              },
+            },
+            thumb: { width: 24, height: 24 },
+            track: { borderRadius: 16, backgroundColor: appliedMode === 'dark' ? '#49454F' : '#79747E', opacity: 1 },
+          },
+        },
+        MuiSlider: { styleOverrides: { thumb: { width: 20, height: 20 } } },
+      },
+    });
+  }, [seedColor, mode, isOverlay]);
+
+  // Early return for Overlay
+  if (isOverlay) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <OverlayMode />
+      </ThemeProvider>
+    );
+  }
+
+  // Calculate estimated time
+  const estimatedMinutes = stats && stats.word_count > 0 ? stats.word_count / speed : 0;
+  const estimatedTimeStr = estimatedMinutes < 1
+    ? `${Math.ceil(estimatedMinutes * 60)}s`
+    : `${Math.floor(estimatedMinutes)}m ${Math.round((estimatedMinutes % 1) * 60)}s`;
+
+  const syncConfig = useCallback(() => {
+    if (!text.trim()) return;
+    const analysis = textAnalysis(text);
+    const calculatedMistakeRate = mistakeRatePercent / 100;
+    window.electronAPI.setConfig({
+      text,
+      options: {
+        speed,
+        speedMode,
+        speedVariance,
+        mistakeRate: calculatedMistakeRate,
+        fatigueMode,
+        analysis,
+        advanced: {
+          realizationSensitivity,
+          reflexRate,
+          backspaceSpeed,
+          pauseScale,
+          burstLength,
+          misalignmentChance,
+          dynamicMistakes
+        }
+      }
+    });
+  }, [
+    text,
+    speed,
+    speedMode,
+    speedVariance,
+    mistakeRatePercent,
+    fatigueMode,
+    realizationSensitivity,
+    reflexRate,
+    backspaceSpeed,
+    pauseScale,
+    burstLength,
+    misalignmentChance,
+    dynamicMistakes
+  ]);
+
+  useEffect(() => {
+    syncConfig();
+  }, [syncConfig]);
+
+  const handleStart = async () => {
+    if (!text.trim()) return;
+
+    setIsTyping(true);
+
+    // Countdown visual logic
+    let count = 3;
+    setCountdown(count);
+    const timer = setInterval(() => {
+      count--;
+      if (count > 0) setCountdown(count);
+      else {
+        clearInterval(timer);
+        setCountdown(null);
+      }
+    }, 1000);
+
+    const analysis = textAnalysis(text);
+    const calculatedMistakeRate = mistakeRatePercent / 100;
+
+    try {
+      await window.electronAPI.startTyping(text, {
+        speed,
+        speedMode,
+        speedVariance,
+        mistakeRate: calculatedMistakeRate,
+        fatigueMode,
+        analysis,
+        advanced: {
+          realizationSensitivity,
+          reflexRate,
+          backspaceSpeed,
+          pauseScale,
+          burstLength,
+          misalignmentChance,
+          dynamicMistakes
+        }
+      });
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsTyping(false);
+      setCountdown(null);
+    }
+  };
+
+  const handleStop = () => {
+    window.electronAPI.stopTyping();
+    setIsTyping(false);
+    setCountdown(null);
+  };
+
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      setText(text);
+    } catch (err) {
+      console.error('Failed to read clipboard contents: ', err);
+    }
+  };
+
+  const drawerWidth = 88; // Standard Nav Rail width
+
+  return (
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
+        <TitleBar />
+        <Box sx={{ display: 'flex', flexGrow: 1, overflow: 'hidden' }}>
+
+          {/* Navigation Rail (Sidebar) */}
+          <Drawer
+            variant="permanent"
+            sx={{
+              width: drawerWidth,
+              flexShrink: 0,
+              [`& .MuiDrawer-paper`]: { width: drawerWidth, boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', py: 4 },
+            }}
+          >
+            {/* ... (Keep existing Sidebar content) ... */}
+            <Box sx={{ mb: 6, mt: 4 }}>
+              <Paper
+                elevation={0}
+                sx={{
+                  width: 48, height: 48, borderRadius: 3,
+                  bgcolor: 'primary.main',
+                  color: 'primary.contrastText', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: 'bold', fontSize: '1.2rem'
+                }}
+              >
+                FT
+              </Paper>
+            </Box>
+
+            <Stack spacing={2} sx={{ width: '100%', alignItems: 'center' }}>
+              <Tooltip title="Write & Configure" placement="right">
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                  <ListItemButton
+                    component={motion.div}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    selected={activeTab === 'write'}
+                    onClick={() => setActiveTab('write')}
+                    sx={{
+                      width: 56,
+                      height: 32,
+                      borderRadius: 100,
+                      justifyContent: 'center',
+                      bgcolor: activeTab === 'write' ? 'rgba(74, 68, 88, 0.6)' : 'transparent', // Active indicator
+                      '&.Mui-selected': { bgcolor: '#4A4458', color: '#E8DEF8' },
+                      '&:hover': { bgcolor: activeTab === 'write' ? '#4A4458' : 'rgba(255,255,255,0.05)' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ justifyContent: 'center', minWidth: 0, color: activeTab === 'write' ? '#E8DEF8' : 'text.secondary' }}>
+                      <TextFields fontSize="small" />
+                    </ListItemIcon>
+                  </ListItemButton>
+                  <Typography variant="caption" color={activeTab === 'write' ? 'text.primary' : 'text.secondary'} sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
+                    Write
+                  </Typography>
+                </Box>
+              </Tooltip>
+
+              <Tooltip title="Settings" placement="right">
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                  <ListItemButton
+                    component={motion.div}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    selected={activeTab === 'settings'}
+                    onClick={() => setActiveTab('settings')}
+                    sx={{
+                      width: 56,
+                      height: 32,
+                      borderRadius: 100,
+                      justifyContent: 'center',
+                      bgcolor: activeTab === 'settings' ? 'rgba(74, 68, 88, 0.6)' : 'transparent',
+                      '&.Mui-selected': { bgcolor: '#4A4458', color: '#E8DEF8' },
+                      '&:hover': { bgcolor: activeTab === 'settings' ? '#4A4458' : 'rgba(255,255,255,0.05)' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ justifyContent: 'center', minWidth: 0, color: activeTab === 'settings' ? '#E8DEF8' : 'text.secondary' }}>
+                      <Settings fontSize="small" />
+                    </ListItemIcon>
+                  </ListItemButton>
+                  <Typography variant="caption" color={activeTab === 'settings' ? 'text.primary' : 'text.secondary'} sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
+                    Config
+                  </Typography>
+                </Box>
+              </Tooltip>
+            </Stack>
+
+            <Box sx={{ mt: 'auto' }}>
+              <Tooltip title={isTyping ? "Active" : "Idle"}>
+                <Box
+                  sx={{
+                    width: 12, height: 12, borderRadius: '50%',
+                    bgcolor: isTyping ? 'success.main' : 'rgba(255,255,255,0.1)',
+                    boxShadow: isTyping ? '0 0 10px rgba(181, 204, 186, 0.5)' : 'none',
+                    transition: 'all 0.5s ease'
+                  }}
+                />
+              </Tooltip>
+            </Box>
+          </Drawer>
+
+          {/* Main Content Area */}
+          <Box component="main" sx={{ flexGrow: 1, position: 'relative', height: '100%', bgcolor: 'background.default', borderRadius: '16px 0 0 16px', overflow: 'hidden' }}>
+
+            {/* WRITE TAB */}
+            <AnimatePresence mode="wait">
+              {activeTab === 'write' && (
+                <motion.div
+                  key="write"
+                  initial={{ opacity: 1, x: 0 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ position: 'absolute', inset: 0, display: 'flex', padding: 24, gap: 24 }}
+                >
+
+                  {/* Editor Column */}
+                  <Paper
+                    elevation={0}
+                    sx={{
+                      flexGrow: 1,
+                      height: '100%',
+                      bgcolor: 'background.paper', // Surface Container
+                      display: 'flex', flexDirection: 'column',
+                      overflow: 'hidden',
+                      position: 'relative'
+                    }}
+                  >
+                    {/* Header */}
+                    <Box sx={{ p: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <Box>
+                        <Typography variant="h6" sx={{ color: 'text.primary' }}>Simulation Input</Typography>
+                      </Box>
+                      <Stack direction="row" spacing={1}>
+                        <Tooltip title="Paste from Clipboard">
+                          <IconButton onClick={handlePaste} size="small" sx={{ color: 'primary.main' }}>
+                            <ContentPaste fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Clear Text">
+                          <IconButton onClick={() => setText('')} size="small" sx={{ color: 'error.main' }}>
+                            <Delete fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Stack>
+                    </Box>
+
+                    <Divider sx={{ borderColor: 'rgba(255,255,255,0.05)' }} />
+
+                    {/* Text Area */}
+                    <Box sx={{ flexGrow: 1, position: 'relative', overflow: 'hidden' }}>
+                      <TextField
+                        multiline
+                        fullWidth
+                        placeholder="Paste or type the text to be simulated..."
+                        value={text}
+                        onChange={(e) => setText(e.target.value)}
+                        disabled={isTyping}
+                        variant="standard"
+                        InputProps={{
+                          disableUnderline: true,
+                          sx: {
+                            height: '100%',
+                            p: 3,
+                            alignItems: 'flex-start',
+                            overflowY: 'auto',
+                            fontSize: '1.1rem',
+                            lineHeight: 1.6,
+                            color: 'text.primary',
+                            '& textarea': { height: '100% !important', overflowY: 'auto !important' }
+                          }
+                        }}
+                        sx={{ height: '100%' }}
+                      />
+
+
+
+                      {/* Active Typing Overlay */}
+                      {isTyping && (
+                        <Box
+                          sx={{
+                            position: 'absolute', inset: 0,
+                            bgcolor: 'rgba(20, 18, 24, 0.9)',
+                            backdropFilter: 'blur(5px)',
+                            display: 'flex', flexDirection: 'column',
+                            alignItems: 'center', justifyContent: 'center',
+                            zIndex: 10,
+                            borderRadius: 4
+                          }}
+                        >
+                          {countdown !== null ? (
+                            <motion.div
+                              key={countdown}
+                              initial={{ scale: 0.5, opacity: 0 }}
+                              animate={{ scale: 1, opacity: 1 }}
+                              exit={{ scale: 1.5, opacity: 0 }}
+                              transition={{ duration: 0.5 }}
+                            >
+                              <Typography variant="h1" sx={{ fontSize: '8rem', fontWeight: 700, color: 'primary.main' }}>
+                                {countdown}
+                              </Typography>
+                            </motion.div>
+                          ) : (
+                            <Stack spacing={4} alignItems="center">
+                              <Box sx={{ position: 'relative' }}>
+                                <CircularProgress size={100} thickness={3} sx={{ color: 'primary.main' }} />
+                                <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                  <FlashOn sx={{ fontSize: 40, color: 'primary.main' }} />
+                                </Box>
+                              </Box>
+                              <Button
+                                component={motion.button}
+                                whileHover={{ scale: 1.05 }}
+                                whileTap={{ scale: 0.95 }}
+                                variant="contained"
+                                color="error"
+                                size="large"
+                                startIcon={<Stop />}
+                                onClick={handleStop}
+                                sx={{ borderRadius: 100, px: 4, py: 1.5, fontSize: '1.1rem' }}
+                              >
+                                Stop
+                              </Button>
+                            </Stack>
+                          )}
+                        </Box>
+                      )}
+                    </Box>
+                  </Paper>
+
+                  {/* Config Panel (Right) - Surface Container High */}
+                  <ConfigPanel
+                    configMode={configMode}
+                    setConfigMode={setConfigMode}
+                    targetMinutes={targetMinutes}
+                    setTargetMinutes={setTargetMinutes}
+                    targetSeconds={targetSeconds}
+                    setTargetSeconds={setTargetSeconds}
+                    speed={speed}
+                    setSpeed={setSpeed}
+                    speedMode={speedMode}
+                    setSpeedMode={setSpeedMode}
+                    speedVariance={speedVariance}
+                    setSpeedVariance={setSpeedVariance}
+                    mistakeRatePercent={mistakeRatePercent}
+                    setMistakeRatePercent={setMistakeRatePercent}
+                    fatigueMode={fatigueMode}
+                    setFatigueMode={setFatigueMode}
+                    showAdvanced={showAdvanced}
+                    setShowAdvanced={setShowAdvanced}
+                    realizationSensitivity={realizationSensitivity}
+                    setRealizationSensitivity={setRealizationSensitivity}
+                    reflexRate={reflexRate}
+                    setReflexRate={setReflexRate}
+                    backspaceSpeed={backspaceSpeed}
+                    setBackspaceSpeed={setBackspaceSpeed}
+                    pauseScale={pauseScale}
+                    setPauseScale={setPauseScale}
+                    burstLength={burstLength}
+                    setBurstLength={setBurstLength}
+                    misalignmentChance={misalignmentChance}
+                    setMisalignmentChance={setMisalignmentChance}
+                    dynamicMistakes={dynamicMistakes}
+                    setDynamicMistakes={setDynamicMistakes}
+                    handleStart={handleStart}
+                    text={text}
+                    isTyping={isTyping}
+                    stats={stats}
+                    estimatedTimeStr={estimatedTimeStr}
+                  />
+                </motion.div>
+              )}
+
+              {activeTab === 'settings' && (
+                <motion.div
+                  key="settings"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ position: 'absolute', inset: 0, padding: 48, overflowY: 'auto' }}
+                >
+                  <Box mb={6} sx={{ maxWidth: 800, mx: 'auto' }}>
+                    <Typography variant="h2" gutterBottom>App Customization</Typography>
+                    <Typography variant="body1" color="text.secondary">
+                      Personalize your experience and configure system behavior.
+                    </Typography>
+                  </Box>
+
+                  <Grid container spacing={3} sx={{ maxWidth: 800, mx: 'auto' }}>
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <Paper sx={{ p: 3, bgcolor: 'background.paper', backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05))', height: '100%', position: 'relative' }}>
+                        <Stack direction="row" spacing={2} alignItems="center" mb={3}>
+                          <Palette color="primary" />
+                          <Typography variant="h6">Appearance</Typography>
+                        </Stack>
+
+                        <Typography variant="subtitle2" color="text.secondary" mb={2}>Theme Mode</Typography>
+                        <Stack spacing={2} mb={4}>
+                          <Paper
+                            component={motion.div}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            variant="outlined"
+                            onClick={() => setMode('dark')}
+                            sx={{
+                              p: 2, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
+                              bgcolor: mode === 'dark' ? (seedColor === 'violet' ? 'rgba(208, 188, 255, 0.08)' : 'rgba(0,0,0,0.2)') : 'transparent',
+                              borderColor: mode === 'dark' ? 'primary.main' : 'divider',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            <DarkMode color={mode === 'dark' ? 'primary' : 'disabled'} />
+                            <Typography variant="body2" fontWeight={mode === 'dark' ? 600 : 400}>Deep Space</Typography>
+                          </Paper>
+                          <Paper
+                            component={motion.div}
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            variant="outlined"
+                            onClick={() => setMode('light')}
+                            sx={{
+                              p: 2, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
+                              bgcolor: mode === 'light' ? 'primary.light' : 'transparent', // tint
+                              borderColor: mode === 'light' ? 'primary.main' : 'divider',
+                              transition: 'all 0.2s',
+                              opacity: mode === 'light' ? 1 : 0.7
+                            }}
+                          >
+                            <LightMode color={mode === 'light' ? 'primary' : 'disabled'} />
+                            <Typography variant="body2" fontWeight={mode === 'light' ? 600 : 400}>Light Mode</Typography>
+                          </Paper>
+                        </Stack>
+
+                        <Typography variant="subtitle2" color="text.secondary" mb={2}>Color Scheme</Typography>
+                        <Stack direction="row" spacing={2}>
+                          {Object.entries(colorPalettes).map(([key, pal]) => (
+                            <Tooltip title={key.charAt(0).toUpperCase() + key.slice(1)} key={key}>
+                              <Box
+                                component={motion.div}
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.9 }}
+                                onClick={() => setSeedColor(key)}
+                                sx={{
+                                  width: 48, height: 48, borderRadius: '50%',
+                                  bgcolor: pal[mode].primary,
+                                  cursor: 'pointer',
+                                  border: seedColor === key ? `4px solid ${theme.palette.text.primary}` : '2px solid transparent',
+                                  boxShadow: seedColor === key ? '0 0 0 2px ' + pal[mode].background : 'none',
+                                  transition: 'all 0.2s',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center'
+                                }}
+                              >
+                                {seedColor === key && <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: theme.palette.background.default }} />}
+                              </Box>
+                            </Tooltip>
+                          ))}
+                        </Stack>
+
+                      </Paper>
+                    </Grid>
+
+                    <Grid size={{ xs: 12, md: 6 }}>
+                      <Paper sx={{ p: 3, bgcolor: 'background.paper', backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05))', height: '100%', position: 'relative' }}>
+                        <Stack direction="row" spacing={2} alignItems="center" mb={3}>
+                          <Monitor color="info" />
+                          <Typography variant="h6">Overlay</Typography>
+                        </Stack>
+                        <Typography variant="body2" color="text.secondary" paragraph>
+                          Control how the typing simulation overlays on other windows.
+                        </Typography>
+                        <Box sx={{ position: 'absolute', top: 16, right: 16, bgcolor: 'secondary.container', color: 'secondary.contrastText', px: 1, py: 0.5, borderRadius: 1, fontSize: '0.65rem' }}>
+                          SOON
+                        </Box>
+                      </Paper>
+                    </Grid>
+                  </Grid>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+          </Box>
+        </Box>
+      </Box>
+    </ThemeProvider>
+  );
+}
+
+export default App;
