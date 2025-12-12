@@ -1,109 +1,78 @@
+# Final Typer (Electron)
 
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Electron](https://img.shields.io/badge/Electron-191970?style=for-the-badge&logo=Electron&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=Vite&logoColor=white)
+![MUI](https://img.shields.io/badge/MUI-%230081CB.svg?style=for-the-badge&logo=mui&logoColor=white)
+![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge)
 
-
-# ![FT-1-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/e19e7746-0dde-488d-8083-7264d933b4b9)
-
-
-A sophisticated text typing simulator with customizable typing patterns and realistic human-like behavior. Also my CS50x final project :)
+A modern, highly configurable typing simulation engine built with Electron, React, and TypeScript. This application is designed to simulate human-like typing patterns with adjustable speed, error rates, and natural variations.
 
 ## Features
 
-- **Dual Mode Operation**
-  - Simple Mode: Basic WPM control
-  - Advanced Mode: Detailed control over typing parameters
+### 🧠 Smart & Custom Modes
+- **Smart Mode:** Set a target duration (minutes and seconds), and the engine automatically calculates the required typing speed (WPM) to finish the text exactly on time.
+- **Custom Mode:** Manually set your target WPM and fine-tune behavior.
 
-- **Realistic Typing Simulation**
-  - Natural typing delays
-  - Realistic error patterns
-  - Fatigue simulation
-  - Smart pause timing
-    
-   ![Recording2024-12-23135432-ezgif com-video-to-gif-converter](https://github.com/user-attachments/assets/79b3ed93-ab5f-4b2c-a572-5e6927d3fcf0)
+### ⚡ Humanized Typing Simulation
+- **Natural Variation:** Simulates human speed drift/fatigue so typing isn't robotic.
+- **Variance Intensity:** Control how much the speed fluctuates during the session.
+- **Burst Mode:** Simulate bursts of speed followed by brief pauses, mimicking natural thought processing.
 
-- **Text Analysis**
-  - Word count
-  - Unique word count
-  - Average word length
-  - Character frequency
-  - Sentence analysis
+### ⚠️ Advanced Error Handling
+- **Configurable Mistake Rate:** Set the percentage of characters that will be mistyped.
+- **Dynamic Mistakes:** Option to scale error frequency based on typing complexity.
+- **Realistic Corrections:**
+  - **Reflex Rate:** Percentage of errors corrected instantly vs. delayed.
+  - **Correction Delay:** Adjustable delay before pressing backspace.
+  - **Backtrack Sensitivity:** Controls how far back the typer will go to fix errors.
 
-- **Customizable Interface**
-  - Dark/Light theme support
-  - Real-time statistics
-  - User-friendly GUI
-  - **Auto saves user preferences** 
+### 🛠️ Fine-Tuning
+- **Pause Multiplier:** Scale the duration of natural pauses (e.g., after sentences or paragraphs).
+- **Misalignment Chance:** Simulates hand misalignment errors.
 
-## Requirements
-
-- Python 3.x
-- Required packages:
-  ```
-  pyautogui
-  customtkinter
-  tkinter
-  ```
+### 💻 Tech Stack
+- **Frontend:** React, Material UI (MUI), Framer Motion, Tailwind CSS
+- **Backend/Shell:** Electron, TypeScript
+- **Build Tool:** Vite
 
 ## Installation
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Peteryhs/Final-Typer
-   ```
+1.  **Clone the repository** (if you haven't already):
+    ```bash
+    git clone <repository-url>
+    cd final-typer-electron/electron-app
+    ```
 
-2. Install required packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
+2.  **Install dependencies:**
+    ```bash
+    npm install
+    ```
+
+3.  **Run in Development Mode:**
+    ```bash
+    npm run electron:dev
+    ```
+
+## Building
+
+To create a standalone executable for your system:
+
+```bash
+npm run build
+```
+This will generate an installer in the `dist/` directory.
+*Supports both x64 and arm64 architectures on Windows.*
 
 ## Usage
 
-1. Run the application:
-   ```bash
-   python final_typer.py
-   ```
+1.  Paste the text you want to type into the main input area.
+2.  Open the **Config Panel** (drag from the right side or click the handle).
+3.  Choose your mode (**Smart** or **Custom**) and adjust parameters.
+4.  Click **Start Engine** to begin the simulation.
+5.  Focus on the target window where you want the typing to occur (if applicable, or watch the simulation in-app).
 
-2. Enter your text in the main text box
+## License
 
-3. Choose your preferred mode:
-   - **Simple Mode**: Just adjust WPM using the slider
-   - **Advanced Mode**: Set specific WPM, error rate, and enable fatigue mode
-
-4. Click "Get Stats of Text" to view text analysis
-
-5. Click "Start Typing" to begin simulation (3-second delay)
-
-## Features in Detail
-
-### Text Analysis
-- Word count calculation
-- Unique word identification
-- Character frequency analysis
-- Sentence structure analysis
-- Average word length computation
-
-### Typing Simulation
-- Realistic typing patterns
-- Natural pauses at punctuation
-- Common typing error simulation
-- Keyboard layout-based mistakes
-- Progressive fatigue simulation
-
-### Interface
-- Modern GUI with customtkinter
-- Dark/Light theme options
-- Real-time statistics display
-- Simple/Advanced mode toggle
-- Intuitive controls
-
-### Images
-![image](https://github.com/user-attachments/assets/8e62d36c-7add-4ed5-b9e9-0d01db75f0de)
-
-
-## Contributing
-
-Feel free to submit issues and enhancement requests!
-
-## Credits
-
-Developed by: Peteryhs
-
+Distributed under the Apache 2.0 License. See `LICENSE` for more information.
