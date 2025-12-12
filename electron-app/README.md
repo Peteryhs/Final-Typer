@@ -1,5 +1,12 @@
 # Final Typer (Electron)
 
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB)
+![Electron](https://img.shields.io/badge/Electron-191970?style=for-the-badge&logo=Electron&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white)
+![Vite](https://img.shields.io/badge/Vite-646CFF?style=for-the-badge&logo=Vite&logoColor=white)
+![MUI](https://img.shields.io/badge/MUI-%230081CB.svg?style=for-the-badge&logo=mui&logoColor=white)
+![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg?style=for-the-badge)
+
 A modern, highly configurable typing simulation engine built with Electron, React, and TypeScript. This application is designed to simulate human-like typing patterns with adjustable speed, error rates, and natural variations.
 
 ## Features
