@@ -733,6 +733,23 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                                             />
                                         </Box>
 
+                                        <Box>
+                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
+                                                <Typography variant="caption" color="text.secondary">Cursor Move Delay (ms)</Typography>
+                                                <Typography variant="caption" fontFamily="monospace">{Math.round(advanced.fixSessionCursorMoveDelaySeconds * 1000)}ms</Typography>
+                                            </Stack>
+                                            <Slider
+                                                size="small"
+                                                value={advanced.fixSessionCursorMoveDelaySeconds}
+                                                min={0.02} max={0.15} step={0.01}
+                                                onChange={(_, v) => setA('fixSessionCursorMoveDelaySeconds', v as number)}
+                                                sx={{ height: 3, py: 0 }}
+                                            />
+                                            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.6rem', display: 'block', mt: 0.5 }}>
+                                                Higher = more reliable on slow apps (Google Docs)
+                                            </Typography>
+                                        </Box>
+
                                         <Stack direction="row" justifyContent="space-between" alignItems="center">
                                             <Box>
                                                 <Typography variant="caption" color="text.secondary" display="block">Synonym Replace</Typography>

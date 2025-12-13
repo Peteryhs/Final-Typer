@@ -297,13 +297,13 @@ export function createTypingPlan(rawText: string, options: TypingOptions): Typin
 
   const moveCaretTo = (target: number) => {
     const t = clamp(target, 0, buffer.length);
-    const delay = clamp(adv.fixSessionCursorMoveDelaySeconds, 0.02, 0.12);
+    const delay = clamp(adv.fixSessionCursorMoveDelaySeconds, 0.04, 0.15);
     const movedAny = caret !== t;
     while (caret < t) pressKey('RIGHT', delay);
     while (caret > t) pressKey('LEFT', delay);
     // Add a brief sync pause after cursor movement to ensure the target app has processed all keys
     if (movedAny) {
-      addPause(0.05, 'cursor-move-sync');
+      addPause(0.08, 'cursor-move-sync');
     }
   };
 
@@ -318,8 +318,8 @@ export function createTypingPlan(rawText: string, options: TypingOptions): Typin
 
     // Always start from the end (most realistic "review then continue typing").
     // Use a longer delay and add a brief pause after to ensure cursor has synced.
-    pressKey('CTRL_END', 0.05);
-    addPause(0.06, 'cursor-sync');
+    pressKey('CTRL_END', 0.08);
+    addPause(0.1, 'cursor-sync');
 
     const maxFixes = mode === 'final' ? Number.POSITIVE_INFINITY : Math.max(1, Math.floor(adv.fixSessionMaxFixes));
     const selected = pendingFixes.slice(0, Math.min(pendingFixes.length, maxFixes));
@@ -367,8 +367,8 @@ export function createTypingPlan(rawText: string, options: TypingOptions): Typin
       pendingFixes.length = 0;
     }
 
-    pressKey('CTRL_END', 0.05);
-    addPause(0.06, 'cursor-sync');
+    pressKey('CTRL_END', 0.08);
+    addPause(0.1, 'cursor-sync');
     addPause(0.12 + rng.float() * 0.25, 'fix-session-return');
   };
 

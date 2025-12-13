@@ -223,9 +223,9 @@ export async function executeTypingPlan(
     const isBackspace = step.key === 'BACKSPACE';
     let minDelay = 0;
     if (isNavKey) {
-      minDelay = 0.035; // 35ms minimum for navigation keys (increased from 15ms)
+      minDelay = 0.06; // 60ms minimum for navigation keys (increased for Google Docs compatibility)
     } else if (isBackspace) {
-      minDelay = 0.025; // 25ms minimum for backspace
+      minDelay = 0.045; // 45ms minimum for backspace
     }
     await sleepSeconds(Math.max(step.delayAfterSeconds, minDelay), signal);
   }

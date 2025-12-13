@@ -54,7 +54,7 @@ export const DEFAULT_ADVANCED_SETTINGS: TypingAdvancedSettings = {
   fixSessionMaxFixes: 4,
   fixSessionPauseMinSeconds: 0.55,
   fixSessionPauseMaxSeconds: 1.35,
-  fixSessionCursorMoveDelaySeconds: 0.06,
+  fixSessionCursorMoveDelaySeconds: 0.08,
 
   finalVerifyViaClipboard: true,
   finalVerifyMaxAttempts: 4,
