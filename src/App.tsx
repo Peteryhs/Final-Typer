@@ -13,6 +13,9 @@ import {
   DarkMode, LightMode, OpenInFull
 } from '@mui/icons-material';
 import { textAnalysis, TextAnalysisResult } from './lib/analysis';
+import { estimateTypingSeconds } from './lib/typing/estimate';
+import { solveWpmForTargetSeconds } from './lib/typing/solve';
+import { DEFAULT_ADVANCED_SETTINGS } from './lib/typing/defaults';
 import { motion, AnimatePresence } from 'framer-motion';
 import TitleBar from './components/TitleBar';
 import ConfigPanel from './components/ConfigPanel';
@@ -21,7 +24,20 @@ import ConfigPanel from './components/ConfigPanel';
 function useStickyState<T>(defaultValue: T, key: string): [T, React.Dispatch<React.SetStateAction<T>>] {
   const [value, setValue] = useState<T>(() => {
     const stickyValue = localStorage.getItem(key);
-    return stickyValue !== null ? JSON.parse(stickyValue) : defaultValue;
+    if (stickyValue === null) return defaultValue;
+    const parsed = JSON.parse(stickyValue);
+    // Shallow-merge saved objects with defaults to allow painless setting migrations.
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      defaultValue &&
+      typeof defaultValue === 'object' &&
+      !Array.isArray(defaultValue)
+    ) {
+      return { ...(defaultValue as any), ...(parsed as any) };
+    }
+    return parsed;
   });
   useEffect(() => {
     localStorage.setItem(key, JSON.stringify(value));
@@ -146,13 +162,7 @@ function App() {
 
   // Advanced State
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [realizationSensitivity, setRealizationSensitivity] = useStickyState(0.15, 'ft_adv_realization');
-  const [reflexRate, setReflexRate] = useStickyState(0.05, 'ft_adv_reflex');
-  const [backspaceSpeed, setBackspaceSpeed] = useStickyState(0.06, 'ft_adv_backspace');
-  const [pauseScale, setPauseScale] = useStickyState(1.0, 'ft_adv_pause');
-  const [burstLength, setBurstLength] = useStickyState(4, 'ft_adv_burst');
-  const [misalignmentChance, setMisalignmentChance] = useStickyState(0.15, 'ft_adv_misalign');
-  const [dynamicMistakes, setDynamicMistakes] = useStickyState(true, 'ft_adv_dynamic_mistakes');
+  const [advanced, setAdvanced] = useStickyState(DEFAULT_ADVANCED_SETTINGS, 'ft_adv_all');
 
   const [stats, setStats] = useState<TextAnalysisResult | null>(null);
   const [isTyping, setIsTyping] = useState(false);
@@ -169,16 +179,22 @@ function App() {
     if (configMode === 'smart' && stats && stats.word_count > 0) {
       const totalSeconds = (targetMinutes * 60) + targetSeconds;
       if (totalSeconds > 0) {
-        // Speed = Words / Minutes
-        const calculatedSpeed = Math.round(stats.word_count / (totalSeconds / 60));
-        // Clamp reasonably
-        const safeSpeed = Math.max(10, Math.min(calculatedSpeed, 999));
-        setSpeed(safeSpeed);
-        setSpeedMode('dynamic'); // Smart implies dynamic/natural usually, or we can enforce it
-        setSpeedVariance(0.15); // Default natural variance for smart mode
+        const calculatedMistakeRate = mistakeRatePercent / 100;
+        const baseOptions = {
+          speedMode: 'dynamic' as const,
+          speedVariance: 0.15,
+          mistakeRate: calculatedMistakeRate,
+          fatigueMode,
+          analysis: stats,
+          advanced,
+        };
+        const solved = solveWpmForTargetSeconds(text, baseOptions, totalSeconds, { minWpm: 10, maxWpm: 350 });
+        setSpeed(Math.max(10, Math.min(solved.wpm, 999)));
+        setSpeedMode('dynamic');
+        setSpeedVariance(0.15);
       }
     }
-  }, [configMode, stats, targetMinutes, targetSeconds, setSpeed, setSpeedMode, setSpeedVariance]);
+  }, [configMode, stats, targetMinutes, targetSeconds, setSpeed, setSpeedMode, setSpeedVariance, text, mistakeRatePercent, fatigueMode, advanced]);
 
   const theme = useMemo(() => {
     const palette = colorPalettes[seedColor][mode];
@@ -254,11 +270,32 @@ function App() {
     );
   }
 
-  // Calculate estimated time
-  const estimatedMinutes = stats && stats.word_count > 0 ? stats.word_count / speed : 0;
-  const estimatedTimeStr = estimatedMinutes < 1
-    ? `${Math.ceil(estimatedMinutes * 60)}s`
-    : `${Math.floor(estimatedMinutes)}m ${Math.round((estimatedMinutes % 1) * 60)}s`;
+  const estimate = useMemo(() => {
+    if (!text.trim() || !stats) return null;
+    const calculatedMistakeRate = mistakeRatePercent / 100;
+    return estimateTypingSeconds(
+      text,
+      {
+        speed,
+        speedMode,
+        speedVariance,
+        mistakeRate: calculatedMistakeRate,
+        fatigueMode,
+        analysis: stats,
+        advanced,
+      },
+      3,
+    );
+  }, [text, stats, speed, speedMode, speedVariance, mistakeRatePercent, fatigueMode, advanced]);
+
+  const estimatedTimeStr = useMemo(() => {
+    const seconds = estimate?.meanSeconds ?? 0;
+    if (!seconds || seconds <= 0) return '0s';
+    if (seconds < 60) return `${Math.ceil(seconds)}s`;
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    return `${m}m ${s}s`;
+  }, [estimate]);
 
   const syncConfig = useCallback(() => {
     if (!text.trim()) return;
@@ -273,15 +310,7 @@ function App() {
         mistakeRate: calculatedMistakeRate,
         fatigueMode,
         analysis,
-        advanced: {
-          realizationSensitivity,
-          reflexRate,
-          backspaceSpeed,
-          pauseScale,
-          burstLength,
-          misalignmentChance,
-          dynamicMistakes
-        }
+        advanced
       }
     });
   }, [
@@ -291,13 +320,7 @@ function App() {
     speedVariance,
     mistakeRatePercent,
     fatigueMode,
-    realizationSensitivity,
-    reflexRate,
-    backspaceSpeed,
-    pauseScale,
-    burstLength,
-    misalignmentChance,
-    dynamicMistakes
+    advanced
   ]);
 
   useEffect(() => {
@@ -332,15 +355,7 @@ function App() {
         mistakeRate: calculatedMistakeRate,
         fatigueMode,
         analysis,
-        advanced: {
-          realizationSensitivity,
-          reflexRate,
-          backspaceSpeed,
-          pauseScale,
-          burstLength,
-          misalignmentChance,
-          dynamicMistakes
-        }
+        advanced
       });
     } catch (e) {
       console.error(e);
@@ -619,20 +634,8 @@ function App() {
                     setFatigueMode={setFatigueMode}
                     showAdvanced={showAdvanced}
                     setShowAdvanced={setShowAdvanced}
-                    realizationSensitivity={realizationSensitivity}
-                    setRealizationSensitivity={setRealizationSensitivity}
-                    reflexRate={reflexRate}
-                    setReflexRate={setReflexRate}
-                    backspaceSpeed={backspaceSpeed}
-                    setBackspaceSpeed={setBackspaceSpeed}
-                    pauseScale={pauseScale}
-                    setPauseScale={setPauseScale}
-                    burstLength={burstLength}
-                    setBurstLength={setBurstLength}
-                    misalignmentChance={misalignmentChance}
-                    setMisalignmentChance={setMisalignmentChance}
-                    dynamicMistakes={dynamicMistakes}
-                    setDynamicMistakes={setDynamicMistakes}
+                    advanced={advanced}
+                    setAdvanced={setAdvanced}
                     handleStart={handleStart}
                     text={text}
                     isTyping={isTyping}

@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   startTyping: (text: string, options: any) => ipcRenderer.invoke('start-typing', text, options),
   stopTyping: () => ipcRenderer.send('stop-typing'),
-  
+
   // Overlay & State Management
   toggleOverlay: () => ipcRenderer.send('toggle-overlay'),
   setConfig: (config: any) => ipcRenderer.send('set-config', config),

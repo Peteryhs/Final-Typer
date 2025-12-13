@@ -6,7 +6,13 @@
     "outDir": "dist-electron",
     "target": "ES2020",
     "moduleResolution": "Node",
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
     "strict": true
   },
-  "include": ["src/electron/**/*", "src/lib/**/*"]
+  "include": [
+    "src/electron/**/*",
+    "src/lib/**/*",
+    "dict.json"
+  ]
 }

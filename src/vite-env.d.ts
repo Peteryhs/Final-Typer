@@ -7,13 +7,62 @@ interface Window {
 type SpeedMode = 'constant' | 'dynamic';
 
 interface TypingAdvancedOptions {
-  realizationSensitivity: number;
-  reflexRate: number;
-  backspaceSpeed: number;
+  // Timing model
+  keystrokesPerWord: number;
+  minInterKeyDelaySeconds: number;
+  maxInterKeyDelaySeconds: number;
+  lognormalSigma: number;
+
+  // Pauses / bursts
   pauseScale: number;
-  burstLength?: number;
-  misalignmentChance?: number;
-  dynamicMistakes?: boolean;
+  microPauseChance: number;
+  microPauseMinSeconds: number;
+  microPauseMaxSeconds: number;
+  burstEnabled: boolean;
+  burstWordsMin: number;
+  burstWordsMax: number;
+  burstSpeedMultiplier: number;
+  burstThinkingPauseMinSeconds: number;
+  burstThinkingPauseMaxSeconds: number;
+
+  // Mistakes
+  dynamicMistakes: boolean;
+  caseSensitiveTypos: boolean;
+  typoNearbyWeight: number;
+  typoRandomWeight: number;
+  typoDoubleWeight: number;
+  typoSkipWeight: number;
+
+  // Corrections
+  reflexRate: number;
+  reflexHesitationMinSeconds: number;
+  reflexHesitationMaxSeconds: number;
+  backspaceDelaySeconds: number;
+  realizationBaseChance: number;
+  realizationSensitivity: number;
+  realizationMinDelayChars: number;
+  realizationMaxDelayChars: number;
+  deletionBacktrackChance: number;
+
+  // Synonyms
+  synonymReplaceEnabled: boolean;
+  synonymReplaceChance: number;
+  synonymCorrectionMode: 'live' | 'backtrack';
+  synonymBacktrackMinWords: number;
+  synonymBacktrackMaxWords: number;
+
+  // Fix sessions
+  fixSessionsEnabled: boolean;
+  fixSessionIntervalWords: number;
+  fixSessionMaxFixes: number;
+  fixSessionPauseMinSeconds: number;
+  fixSessionPauseMaxSeconds: number;
+  fixSessionCursorMoveDelaySeconds: number;
+
+  // Verification
+  finalVerifyViaClipboard: boolean;
+  finalVerifyMaxAttempts: number;
+  finalRewriteOnMismatch: boolean;
 }
 
 interface TypingOptions {
