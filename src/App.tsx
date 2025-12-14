@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   ThemeProvider, createTheme, CssBaseline,
   Box, Drawer, ListItemButton, ListItemIcon,
@@ -10,7 +10,8 @@ import {
   PlayArrow, Stop, TextFields,
   Settings, ContentPaste, Delete,
   FlashOn, Palette, Monitor,
-  DarkMode, LightMode, OpenInFull
+  DarkMode, LightMode, OpenInFull,
+  BugReport, FileUpload, FileDownload, Code
 } from '@mui/icons-material';
 import { textAnalysis, TextAnalysisResult } from './lib/analysis';
 import { estimateTypingSeconds } from './lib/typing/estimate';
@@ -19,6 +20,7 @@ import { DEFAULT_ADVANCED_SETTINGS } from './lib/typing/defaults';
 import { motion, AnimatePresence } from 'framer-motion';
 import TitleBar from './components/TitleBar';
 import ConfigPanel from './components/ConfigPanel';
+import { DebugPanel, useDebugPanel } from './components/DebugPanel';
 
 // Hook for local storage persistence
 function useStickyState<T>(defaultValue: T, key: string): [T, React.Dispatch<React.SetStateAction<T>>] {
@@ -42,6 +44,22 @@ function useStickyState<T>(defaultValue: T, key: string): [T, React.Dispatch<Rea
   useEffect(() => {
     localStorage.setItem(key, JSON.stringify(value));
   }, [key, value]);
+
+  // Sync across windows (main <-> overlay)
+  useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === key && e.newValue) {
+        try {
+          setValue(JSON.parse(e.newValue));
+        } catch (err) {
+          console.error('Failed to parse storage update', err);
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [key]);
+
   return [value, setValue];
 }
 
@@ -69,15 +87,51 @@ const colorPalettes: Record<string, {
 };
 
 // --- OVERLAY COMPONENT ---
-function OverlayMode() {
-  const [isTyping, setIsTyping] = useState(false);
+interface OverlayModeProps {
+  stats: TextAnalysisResult | null;
+  textLength: number;
+}
 
-  const handleToggle = async () => {
+function OverlayMode({ stats: _stats, textLength }: OverlayModeProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    // Listen for auto-collapse from main process (blur)
+    const cleanup = window.electronAPI.onOverlayCollapsed(() => {
+      setIsExpanded(false);
+    });
+    return cleanup;
+  }, []);
+
+  // Track progress via debug logs
+  useEffect(() => {
+    const cleanup = window.electronAPI.onDebugLog((log) => {
+      if (textLength > 0 && typeof log.caret === 'number') {
+        const p = Math.min(1, Math.max(0, log.caret / textLength));
+        setProgress(p);
+      }
+    });
+    return cleanup;
+  }, [textLength]);
+
+  const setExpanded = (expanded: boolean) => {
+    if (isExpanded === expanded) return;
+    setIsExpanded(expanded);
+    // If expanding, resize window immediately to fit the panel
+    if (expanded) {
+      window.electronAPI.setOverlayExpanded(true);
+    }
+  };
+
+  const handleToggleTyping = async () => {
     if (isTyping) {
       window.electronAPI.stopTyping();
       setIsTyping(false);
     } else {
       setIsTyping(true);
+      setProgress(0); // Reset progress on start
       try {
         await window.electronAPI.signalStart();
       } catch (e) {
@@ -88,53 +142,170 @@ function OverlayMode() {
     }
   };
 
+  const handleBackToMain = () => {
+    window.electronAPI.toggleOverlay();
+  };
+
+  const collapseTimeout = useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseEnterPanel = () => {
+    if (collapseTimeout.current) {
+      clearTimeout(collapseTimeout.current);
+      collapseTimeout.current = null;
+    }
+  };
+
+  const handleMouseLeavePanel = () => {
+    collapseTimeout.current = setTimeout(() => {
+      setExpanded(false);
+    }, 400);
+  };
+
   return (
-    <Box
-      sx={{
-        width: '100vw', height: '100vh',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        bgcolor: 'rgba(0,0,0,0)' // Transparent body
-      }}
-    >
-      <Paper
-        component={motion.div}
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ type: "spring", stiffness: 300, damping: 20 }}
-        elevation={6}
-        sx={{
-          width: '100%', height: '100%',
-          bgcolor: 'rgba(28, 27, 31, 0.9)',
-          backdropFilter: 'blur(10px)',
-          borderRadius: 0,
-          border: '1px solid rgba(255,255,255,0.1)',
-          display: 'flex', flexDirection: 'row', alignItems: 'center', px: 2, gap: 2,
-          // DRAG REGION
-          WebkitAppRegion: 'drag',
-          '& button': { WebkitAppRegion: 'no-drag' }
-        }}
-      >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mr: 'auto' }}>
-          <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: isTyping ? 'success.main' : 'warning.main', boxShadow: isTyping ? '0 0 8px #66bb6a' : 'none' }} />
-          <Typography variant="caption" fontWeight={700} color="text.secondary">FINAL TYPER</Typography>
-        </Box>
+    <Box sx={{ width: '100%', height: '100%' }}>
+      <AnimatePresence mode="wait" onExitComplete={() => {
+        // If we just collapsed (isExpanded is false), NOW shrink the electron window
+        if (!isExpanded) {
+          window.electronAPI.setOverlayExpanded(false);
+        }
+      }}>
+        {!isExpanded ? (
+          <Box
+            key="triangle"
+            component={motion.div}
+            initial={{ opacity: 0, scale: 0.5 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.2 }}
+            transition={{ duration: 0.2 }}
+            sx={{
+              width: '100%',
+              height: '100%',
+              position: 'relative',
+              transformOrigin: 'top left',
+              pointerEvents: 'none', // Container doesn't block clicks
+            }}
+          >
+            {/* Triangle shape using CSS clip-path */}
+            <Box
+              className="triangle"
+              onMouseEnter={() => setExpanded(true)}
+              onClick={() => setExpanded(true)}
+              sx={{
+                width: 40,
+                height: 40,
+                background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(200,200,200,0.9) 100%)',
+                clipPath: 'polygon(0 0, 100% 0, 0 100%)',
+                borderRadius: '4px 0 0 0',
+                transition: 'all 0.2s ease',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+                position: 'relative',
+                cursor: 'pointer',
+                pointerEvents: 'auto', // Only triangle captures clicks
+                '&:hover': {
+                  transform: 'scale(1.1)',
+                  boxShadow: '0 0 12px rgba(255,255,255,0.5)',
+                },
+                '&::after': {
+                  content: '""',
+                  position: 'absolute',
+                  top: 6,
+                  left: 6,
+                  width: 8,
+                  height: 8,
+                  borderRadius: '50%',
+                  bgcolor: isTyping ? '#4caf50' : 'rgba(0,0,0,0.3)',
+                  boxShadow: isTyping ? '0 0 6px #4caf50' : 'none',
+                  transition: 'all 0.3s',
+                },
+              }}
+            />
+          </Box>
+        ) : (
+          <Paper
+            key="panel"
+            onMouseEnter={handleMouseEnterPanel}
+            onMouseLeave={handleMouseLeavePanel}
+            component={motion.div}
+            initial={{ opacity: 0, scale: 0.2 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.2 }}
+            style={{ transformOrigin: 'top left' }}
+            transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+            elevation={8}
+            sx={{
+              width: '100%',
+              height: '100%',
+              bgcolor: 'rgba(28, 27, 31, 0.95)',
+              backdropFilter: 'blur(12px)',
+              borderRadius: 3,
+              border: '1px solid rgba(255,255,255,0.1)',
+              px: 1.5,
+              display: 'flex',
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 1,
+              WebkitAppRegion: 'drag',
+              '& button': { WebkitAppRegion: 'no-drag' },
+            }}
+          >
+            {/* Circular Progress */}
+            <Box sx={{ position: 'relative', width: 36, height: 36 }}>
+              <CircularProgress
+                variant="determinate"
+                value={progress * 100}
+                size={36}
+                thickness={4}
+                sx={{ color: 'primary.main' }}
+              />
+              <Typography
+                variant="caption"
+                sx={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  fontSize: '0.6rem',
+                  fontWeight: 700,
+                  color: 'text.secondary',
+                }}
+              >
+                {Math.round(progress * 100)}
+              </Typography>
+            </Box>
 
-        <IconButton
-          onClick={handleToggle}
-          color={isTyping ? "error" : "primary"}
-          sx={{ bgcolor: 'rgba(255,255,255,0.05)', '&:hover': { bgcolor: 'rgba(255,255,255,0.1)' } }}
-        >
-          {isTyping ? <Stop /> : <PlayArrow />}
-        </IconButton>
+            {/* Play/Pause Button */}
+            <IconButton
+              onClick={handleToggleTyping}
+              size="small"
+              sx={{
+                bgcolor: isTyping ? 'error.main' : 'primary.main',
+                color: 'white',
+                width: 36,
+                height: 36,
+                '&:hover': {
+                  bgcolor: isTyping ? 'error.dark' : 'primary.dark',
+                },
+              }}
+            >
+              {isTyping ? <Stop sx={{ fontSize: 20 }} /> : <PlayArrow sx={{ fontSize: 20 }} />}
+            </IconButton>
 
-        <IconButton
-          size="small"
-          onClick={() => window.electronAPI.toggleOverlay()}
-          sx={{ color: 'text.secondary' }}
-        >
-          <OpenInFull fontSize="small" />
-        </IconButton>
-      </Paper>
+            {/* Open Main Window Button */}
+            <IconButton
+              onClick={handleBackToMain}
+              size="small"
+              sx={{
+                color: 'text.secondary',
+                width: 36,
+                height: 36,
+                '&:hover': { color: 'text.primary' },
+              }}
+            >
+              <OpenInFull sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Paper>
+        )}
+      </AnimatePresence>
     </Box>
   );
 }
@@ -168,6 +339,32 @@ function App() {
   const [isTyping, setIsTyping] = useState(false);
   const [activeTab, setActiveTab] = useState<'write' | 'settings'>('write');
   const [countdown, setCountdown] = useState<number | null>(null);
+
+  // Debug Panel State
+  const {
+    isDebugOpen,
+    setIsDebugOpen,
+    debugLogs,
+    addLog,
+    clearLogs,
+    currentBuffer,
+    currentCaret,
+    disableDoubleTap,
+    setDisableDoubleTap,
+  } = useDebugPanel();
+
+  // Listen for debug logs from main process
+  useEffect(() => {
+    const unsubscribe = window.electronAPI.onDebugLog((log) => {
+      addLog(log);
+    });
+    return () => unsubscribe();
+  }, [addLog]);
+
+  // Sync disable-double-tap setting with main process
+  useEffect(() => {
+    window.electronAPI.setDisableDoubleTap(disableDoubleTap);
+  }, [disableDoubleTap]);
 
   useEffect(() => {
     const res = textAnalysis(text);
@@ -207,7 +404,10 @@ function App() {
         mode: appliedMode,
         primary: { main: appliedPalette.primary },
         secondary: { main: appliedPalette.secondary },
-        background: { default: appliedPalette.background, paper: appliedPalette.surface },
+        background: {
+          default: isOverlay ? 'transparent' : appliedPalette.background,
+          paper: isOverlay ? 'transparent' : appliedPalette.surface
+        },
       },
       typography: {
         fontFamily: '"Roboto Flex", "Inter", "Roboto", "Helvetica", "Arial", sans-serif',
@@ -242,17 +442,34 @@ function App() {
         MuiListItemButton: { styleOverrides: { root: { borderRadius: 100 } } },
         MuiSwitch: {
           styleOverrides: {
-            root: { width: 52, height: 32, padding: 0 },
+            root: { width: 42, height: 24, padding: 0 },
             switchBase: {
-              padding: 4,
+              padding: 2,
               '&.Mui-checked': {
-                transform: 'translateX(20px)',
+                transform: 'translateX(18px)',
                 color: '#fff',
-                '& + .MuiSwitch-track': { opacity: 1, backgroundColor: appliedPalette.primary },
+                '& + .MuiSwitch-track': {
+                  opacity: 1,
+                  backgroundColor: appliedPalette.primary,
+                  border: 'none',
+                },
+              },
+              '&.Mui-disabled + .MuiSwitch-track': {
+                opacity: 0.3,
               },
             },
-            thumb: { width: 24, height: 24 },
-            track: { borderRadius: 16, backgroundColor: appliedMode === 'dark' ? '#49454F' : '#79747E', opacity: 1 },
+            thumb: {
+              width: 20,
+              height: 20,
+              boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+            },
+            track: {
+              borderRadius: 12,
+              backgroundColor: appliedMode === 'dark' ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.25)',
+              opacity: 1,
+              border: appliedMode === 'dark' ? '1px solid rgba(255,255,255,0.1)' : 'none',
+              transition: 'background-color 0.2s',
+            },
           },
         },
         MuiSlider: { styleOverrides: { thumb: { width: 20, height: 20 } } },
@@ -265,7 +482,7 @@ function App() {
     return (
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <OverlayMode />
+        <OverlayMode stats={stats} textLength={text.length} />
       </ThemeProvider>
     );
   }
@@ -471,7 +688,20 @@ function App() {
               </Tooltip>
             </Stack>
 
-            <Box sx={{ mt: 'auto' }}>
+            <Box sx={{ mt: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, pb: 2 }}>
+              <Tooltip title="Debug Console" placement="right">
+                <IconButton
+                  onClick={() => setIsDebugOpen(!isDebugOpen)}
+                  sx={{
+                    color: isDebugOpen ? 'primary.main' : 'text.secondary',
+                    bgcolor: isDebugOpen ? 'rgba(103, 80, 164, 0.2)' : 'transparent',
+                    '&:hover': { bgcolor: 'rgba(103, 80, 164, 0.3)' }
+                  }}
+                >
+                  <BugReport fontSize="small" />
+                </IconButton>
+              </Tooltip>
+
               <Tooltip title={isTyping ? "Active" : "Idle"}>
                 <Box
                   sx={{
@@ -738,14 +968,119 @@ function App() {
                       <Paper sx={{ p: 3, bgcolor: 'background.paper', backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05))', height: '100%', position: 'relative' }}>
                         <Stack direction="row" spacing={2} alignItems="center" mb={3}>
                           <Monitor color="info" />
-                          <Typography variant="h6">Overlay</Typography>
+                          <Typography variant="h6">Overlay Mode</Typography>
                         </Stack>
                         <Typography variant="body2" color="text.secondary" paragraph>
-                          Control how the typing simulation overlays on other windows.
+                          Switch to a minimal corner overlay that stays on top of other windows.
+                          A small triangle appears in the top-left corner for quick access to controls.
                         </Typography>
-                        <Box sx={{ position: 'absolute', top: 16, right: 16, bgcolor: 'secondary.container', color: 'secondary.contrastText', px: 1, py: 0.5, borderRadius: 1, fontSize: '0.65rem' }}>
-                          SOON
-                        </Box>
+
+                        <Button
+                          variant="contained"
+                          color="primary"
+                          startIcon={<OpenInFull />}
+                          onClick={() => {
+                            // Sync config so overlay can start typing
+                            syncConfig();
+                            // Then toggle to overlay mode
+                            window.electronAPI.toggleOverlay();
+                          }}
+                          sx={{ mt: 2 }}
+                        >
+                          Switch to Overlay
+                        </Button>
+                      </Paper>
+                    </Grid>
+
+                    {/* Advanced Config Card */}
+                    <Grid size={{ xs: 12 }}>
+                      <Paper sx={{ p: 3, bgcolor: 'background.paper', backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05))' }}>
+                        <Stack direction="row" spacing={2} alignItems="center" mb={3}>
+                          <Code color="warning" />
+                          <Typography variant="h6">Advanced Configuration</Typography>
+                        </Stack>
+                        <Typography variant="body2" color="text.secondary" paragraph>
+                          View, edit, export and import your typing simulation settings as JSON.
+                        </Typography>
+
+                        <TextField
+                          fullWidth
+                          multiline
+                          minRows={8}
+                          maxRows={16}
+                          value={JSON.stringify(advanced, null, 2)}
+                          onChange={(e) => {
+                            try {
+                              const parsed = JSON.parse(e.target.value);
+                              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                                setAdvanced(prev => ({ ...prev, ...parsed }));
+                              }
+                            } catch {
+                              // Invalid JSON, ignore
+                            }
+                          }}
+                          sx={{
+                            mb: 2,
+                            '& .MuiInputBase-root': {
+                              fontFamily: 'monospace',
+                              fontSize: '0.8rem'
+                            }
+                          }}
+                        />
+
+                        <Stack direction="row" spacing={2}>
+                          <Button
+                            variant="outlined"
+                            startIcon={<FileDownload />}
+                            onClick={() => {
+                              const json = JSON.stringify(advanced, null, 2);
+                              const blob = new Blob([json], { type: 'application/json' });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement('a');
+                              a.href = url;
+                              a.download = 'final-typer-config.json';
+                              a.click();
+                              URL.revokeObjectURL(url);
+                            }}
+                          >
+                            Export Config
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            startIcon={<FileUpload />}
+                            onClick={() => {
+                              const input = document.createElement('input');
+                              input.type = 'file';
+                              input.accept = '.json';
+                              input.onchange = (e) => {
+                                const file = (e.target as HTMLInputElement).files?.[0];
+                                if (!file) return;
+                                const reader = new FileReader();
+                                reader.onload = (ev) => {
+                                  try {
+                                    const parsed = JSON.parse(ev.target?.result as string);
+                                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                                      setAdvanced(prev => ({ ...prev, ...parsed }));
+                                    }
+                                  } catch {
+                                    // Invalid JSON, ignore
+                                  }
+                                };
+                                reader.readAsText(file);
+                              };
+                              input.click();
+                            }}
+                          >
+                            Import Config
+                          </Button>
+                          <Button
+                            variant="text"
+                            color="secondary"
+                            onClick={() => setAdvanced(DEFAULT_ADVANCED_SETTINGS)}
+                          >
+                            Reset to Defaults
+                          </Button>
+                        </Stack>
                       </Paper>
                     </Grid>
                   </Grid>
@@ -756,6 +1091,18 @@ function App() {
           </Box>
         </Box>
       </Box>
+
+      {/* Debug Panel */}
+      <DebugPanel
+        isOpen={isDebugOpen}
+        onClose={() => setIsDebugOpen(false)}
+        logs={debugLogs}
+        currentBuffer={currentBuffer}
+        currentCaret={currentCaret}
+        onClearLogs={clearLogs}
+        disableDoubleTap={disableDoubleTap}
+        onToggleDoubleTap={setDisableDoubleTap}
+      />
     </ThemeProvider>
   );
 }

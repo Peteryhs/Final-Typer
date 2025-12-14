@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx tsx:*)"
+      "Bash(npx tsx:*)",
+      "Bash(npx tsc:*)",
+      "Bash(powershell -Command \"if (Test-Path dist-electron) { Remove-Item -Recurse -Force dist-electron }\")"
     ]
   }
 }

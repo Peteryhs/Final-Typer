@@ -1,10 +1,25 @@
+# Dependencies
 node_modules
+
+# Build outputs
 dist
 dist-electron
 dist-test
 release
+
+# Environment and local files
 *.local
-.DS_Store
 .env
+
+# OS artifacts
+.DS_Store
 thumbs.db
+
+# Debug artifacts
 *.log
+traceResolution.txt
+nul
+
+# IDE
+.vscode
+.idea

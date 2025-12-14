@@ -51,10 +51,10 @@ export const DEFAULT_ADVANCED_SETTINGS: TypingAdvancedSettings = {
   fixSessionsEnabled: true,
   // Default to fairly frequent sessions so the behavior is visible.
   fixSessionIntervalWords: 8,
-  fixSessionMaxFixes: 4,
+  fixSessionMaxFixes: 10,
   fixSessionPauseMinSeconds: 0.55,
   fixSessionPauseMaxSeconds: 1.35,
-  fixSessionCursorMoveDelaySeconds: 0.08,
+  fixSessionCursorMoveDelaySeconds: 0.01,
 
   finalVerifyViaClipboard: true,
   finalVerifyMaxAttempts: 4,

@@ -5,7 +5,8 @@ import {
 } from '@mui/material';
 import {
     AutoAwesome, Tune, AccessTime, ErrorOutline,
-    Science, ExpandLess, ExpandMore, PlayArrow
+    Science, ExpandLess, ExpandMore, PlayArrow,
+    Speed, Psychology, Create, Refresh, Verified
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 import type { TypingAdvancedSettings } from '../lib/typing/types';
@@ -38,6 +39,129 @@ interface ConfigPanelProps {
     estimatedTimeStr: string;
 }
 
+// Reusable slider component for cleaner code
+interface SettingSliderProps {
+    label: string;
+    value: number;
+    min: number;
+    max: number;
+    step: number;
+    onChange: (value: number) => void;
+    format?: (value: number) => string;
+    description?: string;
+}
+
+function SettingSlider({ label, value, min, max, step, onChange, format, description }: SettingSliderProps) {
+    const displayValue = format ? format(value) : value.toString();
+    return (
+        <Box>
+            <Stack direction="row" justifyContent="space-between" mb={0.5}>
+                <Typography variant="caption" color="text.secondary">{label}</Typography>
+                <Typography variant="caption" fontFamily="monospace">{displayValue}</Typography>
+            </Stack>
+            <Slider
+                size="small"
+                value={value}
+                min={min}
+                max={max}
+                step={step}
+                onChange={(_, v) => onChange(v as number)}
+                sx={{ height: 3, py: 0 }}
+            />
+            {description && (
+                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.6rem', display: 'block', mt: 0.5 }}>
+                    {description}
+                </Typography>
+            )}
+        </Box>
+    );
+}
+
+// Reusable toggle component
+interface SettingToggleProps {
+    label: string;
+    description?: string;
+    checked: boolean;
+    onChange: (checked: boolean) => void;
+}
+
+function SettingToggle({ label, description, checked, onChange }: SettingToggleProps) {
+    return (
+        <Stack direction="row" justifyContent="space-between" alignItems="center">
+            <Box>
+                <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
+                {description && (
+                    <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.65rem' }}>
+                        {description}
+                    </Typography>
+                )}
+            </Box>
+            <Switch
+                size="small"
+                checked={checked}
+                onChange={(e) => onChange(e.target.checked)}
+            />
+        </Stack>
+    );
+}
+
+// Collapsible section component with cool styling
+interface CollapsibleSectionProps {
+    icon: React.ElementType;
+    title: string;
+    subtitle?: string;
+    isOpen: boolean;
+    onToggle: () => void;
+    children: React.ReactNode;
+}
+
+function CollapsibleSection({ icon: Icon, title, subtitle, isOpen, onToggle, children }: CollapsibleSectionProps) {
+    return (
+        <Box>
+            <Button
+                fullWidth
+                onClick={onToggle}
+                sx={{
+                    justifyContent: 'space-between',
+                    py: 1,
+                    px: 1.5,
+                    bgcolor: 'rgba(255,255,255,0.03)',
+                    borderRadius: 1,
+                    '&:hover': { bgcolor: 'rgba(255,255,255,0.06)' },
+                    textTransform: 'none',
+                }}
+            >
+                <Stack direction="row" spacing={1} alignItems="center">
+                    <Icon sx={{ fontSize: '1rem', color: 'primary.main' }} />
+                    <Box sx={{ textAlign: 'left' }}>
+                        <Typography variant="caption" fontWeight={700} color="text.primary" sx={{
+                            textTransform: 'uppercase',
+                            letterSpacing: 1,
+                            fontSize: '0.7rem',
+                            display: 'block'
+                        }}>
+                            {title}
+                        </Typography>
+                        {subtitle && (
+                            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.6rem' }}>
+                                {subtitle}
+                            </Typography>
+                        )}
+                    </Box>
+                </Stack>
+                {isOpen ? <ExpandLess sx={{ fontSize: '1rem', color: 'text.secondary' }} /> : <ExpandMore sx={{ fontSize: '1rem', color: 'text.secondary' }} />}
+            </Button>
+            <Collapse in={isOpen}>
+                <Box sx={{ pt: 1.5, pb: 0.5, px: 0.5 }}>
+                    <Stack spacing={1.5}>
+                        {children}
+                    </Stack>
+                </Box>
+            </Collapse>
+        </Box>
+    );
+}
+
 export default function ConfigPanel(props: ConfigPanelProps) {
     const {
         configMode, setConfigMode,
@@ -61,16 +185,20 @@ export default function ConfigPanel(props: ConfigPanelProps) {
     const [width, setWidth] = useState(420);
     const [isDragging, setIsDragging] = useState(false);
 
-    const [advancedJson, setAdvancedJson] = useState(() => JSON.stringify(advanced, null, 2));
-    const [advancedJsonError, setAdvancedJsonError] = useState<string | null>(null);
+    // Track which advanced sections are expanded
+    const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+        rhythm: false,
+        hyperdrive: false,
+        chaos: false,
+        recovery: false,
+        hindsight: false,
+        wordswap: false,
+        integrity: false,
+    });
 
-    // Keep the editor in sync when advanced settings change externally (e.g. presets),
-    // but don't fight the user while they are actively editing.
-    const [isEditingAdvancedJson, setIsEditingAdvancedJson] = useState(false);
-    useEffect(() => {
-        if (isEditingAdvancedJson) return;
-        setAdvancedJson(JSON.stringify(advanced, null, 2));
-    }, [advanced, isEditingAdvancedJson]);
+    const toggleSection = (key: string) => {
+        setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
+    };
 
     const handleMouseDown = (e: React.MouseEvent) => {
         setIsDragging(true);
@@ -81,7 +209,6 @@ export default function ConfigPanel(props: ConfigPanelProps) {
         const handleMouseMove = (e: MouseEvent) => {
             if (!isDragging) return;
             const newWidth = window.innerWidth - e.clientX;
-            // Clamp width between 300 and 800
             setWidth(Math.max(300, Math.min(newWidth, 800)));
         };
 
@@ -111,8 +238,8 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                 flexDirection: 'column',
                 position: 'relative',
                 transition: isDragging ? 'none' : 'width 0.2s ease',
-                p: 3, // Match padding of Simulation Input panel
-                gap: 3 // Match gap of Simulation Input panel
+                p: 3,
+                gap: 3
             }}
         >
             {/* Drag Handle */}
@@ -152,7 +279,7 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                 sx={{
                     flex: 1,
                     minHeight: 0,
-                    overflow: 'hidden', // Contain scroll
+                    overflow: 'hidden',
                     display: 'flex',
                     flexDirection: 'column',
                     bgcolor: 'background.paper',
@@ -460,468 +587,239 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                                             display: 'flex', flexDirection: 'column', gap: 1
                                         }}
                                     >
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Backtrack Sensitivity</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.realizationSensitivity}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.realizationSensitivity}
-                                                min={0.05} max={0.5} step={0.01}
-                                                onChange={(_, v) => setA('realizationSensitivity', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Realization Base Chance</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{Math.round(advanced.realizationBaseChance * 100)}%</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.realizationBaseChance}
-                                                min={0} max={0.2} step={0.005}
-                                                onChange={(_, v) => setA('realizationBaseChance', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Instant Correction %</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{Math.round(advanced.reflexRate * 100)}%</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.reflexRate}
-                                                min={0} max={0.5} step={0.01}
-                                                onChange={(_, v) => setA('reflexRate', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Backspace Delay (s)</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.backspaceDelaySeconds}s</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.backspaceDelaySeconds}
-                                                min={0.01} max={0.2} step={0.01}
-                                                onChange={(_, v) => setA('backspaceDelaySeconds', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Realization Min Delay (chars)</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.realizationMinDelayChars}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.realizationMinDelayChars}
-                                                min={0} max={10} step={1}
-                                                onChange={(_, v) => setA('realizationMinDelayChars', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Realization Max Delay (chars)</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.realizationMaxDelayChars}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.realizationMaxDelayChars}
-                                                min={4} max={60} step={1}
-                                                onChange={(_, v) => setA('realizationMaxDelayChars', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Aggressive Backtrack Chance</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{Math.round(advanced.deletionBacktrackChance * 100)}%</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.deletionBacktrackChance}
-                                                min={0} max={1} step={0.01}
-                                                onChange={(_, v) => setA('deletionBacktrackChance', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Pause Multiplier</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">x{advanced.pauseScale}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.pauseScale}
-                                                min={0.5} max={2.0} step={0.1}
-                                                onChange={(_, v) => setA('pauseScale', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Keystrokes / Word</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.keystrokesPerWord}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                        {/* FLOW & RHYTHM */}
+                                        <CollapsibleSection
+                                            icon={Speed}
+                                            title="Flow & Rhythm"
+                                            subtitle="Timing and natural variation"
+                                            isOpen={openSections.rhythm}
+                                            onToggle={() => toggleSection('rhythm')}
+                                        >
+                                            <SettingSlider
+                                                label="Keystrokes per Word"
                                                 value={advanced.keystrokesPerWord}
                                                 min={4} max={7} step={1}
-                                                onChange={(_, v) => setA('keystrokesPerWord', v as number)}
-                                                sx={{ height: 3, py: 0 }}
+                                                onChange={(v) => setA('keystrokesPerWord', v)}
+                                                description="Standard WPM uses 5 chars/word"
                                             />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Delay Variance (Sigma)</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.lognormalSigma}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                            <SettingSlider
+                                                label="Delay Variance"
                                                 value={advanced.lognormalSigma}
                                                 min={0.05} max={0.6} step={0.01}
-                                                onChange={(_, v) => setA('lognormalSigma', v as number)}
-                                                sx={{ height: 3, py: 0 }}
+                                                onChange={(v) => setA('lognormalSigma', v)}
+                                                description="Higher = more random timing between keys"
                                             />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Micro-Pause Chance</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{Math.round(advanced.microPauseChance * 100)}%</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                            <SettingSlider
+                                                label="Pause Multiplier"
+                                                value={advanced.pauseScale}
+                                                min={0.5} max={2.0} step={0.1}
+                                                onChange={(v) => setA('pauseScale', v)}
+                                                format={(v) => `x${v}`}
+                                            />
+                                            <SettingSlider
+                                                label="Micro-Pause Chance"
                                                 value={advanced.microPauseChance}
                                                 min={0} max={0.1} step={0.005}
-                                                onChange={(_, v) => setA('microPauseChance', v as number)}
-                                                sx={{ height: 3, py: 0 }}
+                                                onChange={(v) => setA('microPauseChance', v)}
+                                                format={(v) => `${Math.round(v * 100)}%`}
                                             />
-                                        </Box>
+                                        </CollapsibleSection>
 
-                                        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Burst Length (Words)</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.burstWordsMax}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                        {/* HYPERDRIVE */}
+                                        <CollapsibleSection
+                                            icon={Speed}
+                                            title="Hyperdrive"
+                                            subtitle="Speed bursts and momentum"
+                                            isOpen={openSections.hyperdrive}
+                                            onToggle={() => toggleSection('hyperdrive')}
+                                        >
+                                            <SettingToggle
+                                                label="Enable Bursts"
+                                                description="Speeds up in short bursts, then pauses"
+                                                checked={advanced.burstEnabled}
+                                                onChange={(v) => setA('burstEnabled', v)}
+                                            />
+                                            <SettingSlider
+                                                label="Burst Length (words)"
                                                 value={advanced.burstWordsMax}
                                                 min={1} max={10} step={1}
-                                                onChange={(_, v) => {
-                                                    const n = v as number;
-                                                    setA('burstEnabled', true);
-                                                    setA('burstWordsMin', n);
-                                                    setA('burstWordsMax', n);
+                                                onChange={(v) => {
+                                                    setA('burstWordsMin', v);
+                                                    setA('burstWordsMax', v);
                                                 }}
-                                                sx={{ height: 3, py: 0 }}
                                             />
-                                        </Box>
-
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
-                                                <Typography variant="caption" color="text.secondary" display="block">Burst Mode</Typography>
-                                                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.65rem' }}>
-                                                    Speeds up in short “bursts”
-                                                </Typography>
-                                            </Box>
-                                            <Switch
-                                                size="small"
-                                                checked={advanced.burstEnabled}
-                                                onChange={(e) => setA('burstEnabled', e.target.checked)}
-                                            />
-                                        </Stack>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Burst Speed</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">x{advanced.burstSpeedMultiplier}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                            <SettingSlider
+                                                label="Burst Speed Boost"
                                                 value={advanced.burstSpeedMultiplier}
                                                 min={1.0} max={1.5} step={0.01}
-                                                onChange={(_, v) => setA('burstSpeedMultiplier', v as number)}
-                                                sx={{ height: 3, py: 0 }}
+                                                onChange={(v) => setA('burstSpeedMultiplier', v)}
+                                                format={(v) => `x${v}`}
                                             />
-                                        </Box>
+                                        </CollapsibleSection>
 
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
-                                                <Typography variant="caption" color="text.secondary" display="block">Case-Sensitive Typos</Typography>
-                                                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.65rem' }}>
-                                                    Typos match capitalization
-                                                </Typography>
-                                            </Box>
-                                            <Switch
-                                                size="small"
-                                                checked={advanced.caseSensitiveTypos}
-                                                onChange={(e) => setA('caseSensitiveTypos', e.target.checked)}
-                                            />
-                                        </Stack>
-
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
-                                                <Typography variant="caption" color="text.secondary" display="block">Dynamic Mistakes</Typography>
-                                                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.65rem' }}>
-                                                    Scale errors with complexity
-                                                </Typography>
-                                            </Box>
-                                            <Switch
-                                                size="small"
+                                        {/* CHAOS ENGINE */}
+                                        <CollapsibleSection
+                                            icon={Create}
+                                            title="Chaos Engine"
+                                            subtitle="Controlled imperfection"
+                                            isOpen={openSections.chaos}
+                                            onToggle={() => toggleSection('chaos')}
+                                        >
+                                            <SettingToggle
+                                                label="Dynamic Mistakes"
+                                                description="Error rate scales with text complexity"
                                                 checked={advanced.dynamicMistakes}
-                                                onChange={(e) => setA('dynamicMistakes', e.target.checked)}
+                                                onChange={(v) => setA('dynamicMistakes', v)}
                                             />
-                                        </Stack>
+                                            <SettingToggle
+                                                label="Case-Sensitive Typos"
+                                                description="Typos match original capitalization"
+                                                checked={advanced.caseSensitiveTypos}
+                                                onChange={(v) => setA('caseSensitiveTypos', v)}
+                                            />
+                                        </CollapsibleSection>
 
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
-                                                <Typography variant="caption" color="text.secondary" display="block">Fix Sessions</Typography>
-                                                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.65rem' }}>
-                                                    Revisits older mistakes after chunks of text
-                                                </Typography>
-                                            </Box>
-                                            <Switch
-                                                size="small"
+                                        {/* RECOVERY PROTOCOL */}
+                                        <CollapsibleSection
+                                            icon={Refresh}
+                                            title="Recovery Protocol"
+                                            subtitle="Error detection and correction"
+                                            isOpen={openSections.recovery}
+                                            onToggle={() => toggleSection('recovery')}
+                                        >
+                                            <SettingSlider
+                                                label="Instant Correction %"
+                                                value={advanced.reflexRate}
+                                                min={0} max={0.5} step={0.01}
+                                                onChange={(v) => setA('reflexRate', v)}
+                                                format={(v) => `${Math.round(v * 100)}%`}
+                                                description="Chance to immediately correct a typo"
+                                            />
+                                            <SettingSlider
+                                                label="Backspace Delay"
+                                                value={advanced.backspaceDelaySeconds}
+                                                min={0.01} max={0.2} step={0.01}
+                                                onChange={(v) => setA('backspaceDelaySeconds', v)}
+                                                format={(v) => `${v}s`}
+                                            />
+                                            <SettingSlider
+                                                label="Realization Chance"
+                                                value={advanced.realizationBaseChance}
+                                                min={0} max={0.2} step={0.005}
+                                                onChange={(v) => setA('realizationBaseChance', v)}
+                                                format={(v) => `${Math.round(v * 100)}%`}
+                                                description="Base chance to notice a past mistake"
+                                            />
+                                            <SettingSlider
+                                                label="Realization Growth"
+                                                value={advanced.realizationSensitivity}
+                                                min={0.01} max={0.15} step={0.005}
+                                                onChange={(v) => setA('realizationSensitivity', v)}
+                                                description="How much chance increases per char since error"
+                                            />
+                                            <SettingSlider
+                                                label="Backtrack Chance"
+                                                value={advanced.deletionBacktrackChance}
+                                                min={0} max={1} step={0.05}
+                                                onChange={(v) => setA('deletionBacktrackChance', v)}
+                                                format={(v) => `${Math.round(v * 100)}%`}
+                                                description="Chance to delete-and-retype vs deferred fix"
+                                            />
+                                        </CollapsibleSection>
+
+                                        {/* HINDSIGHT MODE */}
+                                        <CollapsibleSection
+                                            icon={Psychology}
+                                            title="Hindsight Mode"
+                                            subtitle="Go back and fix old mistakes"
+                                            isOpen={openSections.hindsight}
+                                            onToggle={() => toggleSection('hindsight')}
+                                        >
+                                            <SettingToggle
+                                                label="Enable Hindsight"
+                                                description="Periodically revisit and correct past errors"
                                                 checked={advanced.fixSessionsEnabled}
-                                                onChange={(e) => setA('fixSessionsEnabled', e.target.checked)}
+                                                onChange={(v) => setA('fixSessionsEnabled', v)}
                                             />
-                                        </Stack>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Fix Interval (words)</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.fixSessionIntervalWords}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                            <SettingSlider
+                                                label="Review Interval (words)"
                                                 value={advanced.fixSessionIntervalWords}
                                                 min={2} max={60} step={1}
-                                                onChange={(_, v) => setA('fixSessionIntervalWords', v as number)}
-                                                sx={{ height: 3, py: 0 }}
+                                                onChange={(v) => setA('fixSessionIntervalWords', v)}
+                                                description="Words typed before looking back"
                                             />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Max Fixes / Session</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.fixSessionMaxFixes}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                            <SettingSlider
+                                                label="Max Corrections"
                                                 value={advanced.fixSessionMaxFixes}
-                                                min={1} max={12} step={1}
-                                                onChange={(_, v) => setA('fixSessionMaxFixes', v as number)}
-                                                sx={{ height: 3, py: 0 }}
+                                                min={4} max={20} step={1}
+                                                onChange={(v) => setA('fixSessionMaxFixes', v)}
                                             />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Cursor Move Delay (ms)</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{Math.round(advanced.fixSessionCursorMoveDelaySeconds * 1000)}ms</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                            <SettingSlider
+                                                label="Cursor Speed"
                                                 value={advanced.fixSessionCursorMoveDelaySeconds}
-                                                min={0.02} max={0.15} step={0.01}
-                                                onChange={(_, v) => setA('fixSessionCursorMoveDelaySeconds', v as number)}
-                                                sx={{ height: 3, py: 0 }}
+                                                min={0.001} max={0.06} step={0.001}
+                                                onChange={(v) => setA('fixSessionCursorMoveDelaySeconds', v)}
+                                                format={(v) => `${Math.round(v * 1000)}ms`}
+                                                description="Lower = faster, higher = more reliable"
                                             />
-                                            <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.6rem', display: 'block', mt: 0.5 }}>
-                                                Higher = more reliable on slow apps (Google Docs)
-                                            </Typography>
-                                        </Box>
+                                        </CollapsibleSection>
 
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
-                                                <Typography variant="caption" color="text.secondary" display="block">Synonym Replace</Typography>
-                                                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.65rem' }}>
-                                                    Temporarily types a synonym, then fixes it
-                                                </Typography>
-                                            </Box>
-                                            <Switch
-                                                size="small"
+                                        {/* WORD SWAP */}
+                                        <CollapsibleSection
+                                            icon={Create}
+                                            title="Word Swap"
+                                            subtitle="Synonym substitution simulation"
+                                            isOpen={openSections.wordswap}
+                                            onToggle={() => toggleSection('wordswap')}
+                                        >
+                                            <SettingToggle
+                                                label="Enable Word Swap"
+                                                description="Type a synonym, then correct it"
                                                 checked={advanced.synonymReplaceEnabled}
-                                                onChange={(e) => setA('synonymReplaceEnabled', e.target.checked)}
+                                                onChange={(v) => setA('synonymReplaceEnabled', v)}
                                             />
-                                        </Stack>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Synonym Chance</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{Math.round(advanced.synonymReplaceChance * 100)}%</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                            <SettingSlider
+                                                label="Swap Chance"
                                                 value={advanced.synonymReplaceChance}
                                                 min={0} max={0.25} step={0.01}
-                                                onChange={(_, v) => setA('synonymReplaceChance', v as number)}
-                                                sx={{ height: 3, py: 0 }}
+                                                onChange={(v) => setA('synonymReplaceChance', v)}
+                                                format={(v) => `${Math.round(v * 100)}%`}
                                             />
-                                        </Box>
-
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
-                                                <Typography variant="caption" color="text.secondary" display="block">Synonym Live Fix</Typography>
-                                                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.65rem' }}>
-                                                    Otherwise fixes via backtrack
-                                                </Typography>
-                                            </Box>
-                                            <Switch
-                                                size="small"
+                                            <SettingToggle
+                                                label="Instant Fix"
+                                                description="Correct immediately vs later"
                                                 checked={advanced.synonymCorrectionMode === 'live'}
-                                                onChange={(e) => setA('synonymCorrectionMode', e.target.checked ? 'live' : 'backtrack')}
+                                                onChange={(v) => setA('synonymCorrectionMode', v ? 'live' : 'backtrack')}
                                             />
-                                        </Stack>
+                                        </CollapsibleSection>
 
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Synonym Backtrack Min (words)</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.synonymBacktrackMinWords}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.synonymBacktrackMinWords}
-                                                min={0} max={6} step={1}
-                                                onChange={(_, v) => setA('synonymBacktrackMinWords', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Synonym Backtrack Max (words)</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.synonymBacktrackMaxWords}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
-                                                value={advanced.synonymBacktrackMaxWords}
-                                                min={1} max={12} step={1}
-                                                onChange={(_, v) => setA('synonymBacktrackMaxWords', v as number)}
-                                                sx={{ height: 3, py: 0 }}
-                                            />
-                                        </Box>
-
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
-                                                <Typography variant="caption" color="text.secondary" display="block">Final Verify (Clipboard)</Typography>
-                                                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.65rem' }}>
-                                                    Ctrl+A/Ctrl+C readback (optional)
-                                                </Typography>
-                                            </Box>
-                                            <Switch
-                                                size="small"
+                                        {/* INTEGRITY CHECK */}
+                                        <CollapsibleSection
+                                            icon={Verified}
+                                            title="Integrity Check"
+                                            subtitle="Final verification and repair"
+                                            isOpen={openSections.integrity}
+                                            onToggle={() => toggleSection('integrity')}
+                                        >
+                                            <SettingToggle
+                                                label="Clipboard Verify"
+                                                description="Use Ctrl+A/C to verify final text"
                                                 checked={advanced.finalVerifyViaClipboard}
-                                                onChange={(e) => setA('finalVerifyViaClipboard', e.target.checked)}
+                                                onChange={(v) => setA('finalVerifyViaClipboard', v)}
                                             />
-                                        </Stack>
-
-                                        <Box>
-                                            <Stack direction="row" justifyContent="space-between" mb={0.5}>
-                                                <Typography variant="caption" color="text.secondary">Verify Attempts</Typography>
-                                                <Typography variant="caption" fontFamily="monospace">{advanced.finalVerifyMaxAttempts}</Typography>
-                                            </Stack>
-                                            <Slider
-                                                size="small"
+                                            <SettingSlider
+                                                label="Max Verify Attempts"
                                                 value={advanced.finalVerifyMaxAttempts}
                                                 min={1} max={10} step={1}
-                                                onChange={(_, v) => setA('finalVerifyMaxAttempts', v as number)}
-                                                sx={{ height: 3, py: 0 }}
+                                                onChange={(v) => setA('finalVerifyMaxAttempts', v)}
                                             />
-                                        </Box>
-
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
-                                                <Typography variant="caption" color="text.secondary" display="block">Rewrite On Mismatch</Typography>
-                                                <Typography variant="caption" color="text.disabled" sx={{ fontSize: '0.65rem' }}>
-                                                    Ctrl+A then retype as a last resort
-                                                </Typography>
-                                            </Box>
-                                            <Switch
-                                                size="small"
+                                            <SettingToggle
+                                                label="Full Rewrite on Fail"
+                                                description="If verification fails, Ctrl+A and retype"
                                                 checked={advanced.finalRewriteOnMismatch}
-                                                onChange={(e) => setA('finalRewriteOnMismatch', e.target.checked)}
+                                                onChange={(v) => setA('finalRewriteOnMismatch', v)}
                                             />
-                                        </Stack>
-
-                                        <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)', my: 0.5 }} />
-
-                                        <Typography variant="caption" color="text.secondary">
-                                            Advanced Settings (JSON)
-                                        </Typography>
-                                        <TextField
-                                            value={advancedJson}
-                                            onChange={(e) => {
-                                                setAdvancedJson(e.target.value);
-                                                setAdvancedJsonError(null);
-                                            }}
-                                            onFocus={() => setIsEditingAdvancedJson(true)}
-                                            onBlur={() => setIsEditingAdvancedJson(false)}
-                                            multiline
-                                            minRows={6}
-                                            size="small"
-                                            spellCheck={false}
-                                            sx={{
-                                                '& .MuiInputBase-root': {
-                                                    fontFamily: 'monospace',
-                                                    fontSize: '0.75rem'
-                                                }
-                                            }}
-                                        />
-                                        {advancedJsonError && (
-                                            <Typography variant="caption" color="error.main" sx={{ fontSize: '0.7rem' }}>
-                                                {advancedJsonError}
-                                            </Typography>
-                                        )}
-                                        <Stack direction="row" justifyContent="flex-end" gap={1}>
-                                            <Button
-                                                size="small"
-                                                variant="outlined"
-                                                onClick={() => {
-                                                    setAdvancedJson(JSON.stringify(advanced, null, 2));
-                                                    setAdvancedJsonError(null);
-                                                }}
-                                            >
-                                                Reset
-                                            </Button>
-                                            <Button
-                                                size="small"
-                                                variant="contained"
-                                                onClick={() => {
-                                                    try {
-                                                        const parsed = JSON.parse(advancedJson);
-                                                        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-                                                            throw new Error('Expected a JSON object');
-                                                        }
-                                                        setAdvanced((prev) => ({ ...prev, ...(parsed as any) }));
-                                                        setAdvancedJsonError(null);
-                                                        setIsEditingAdvancedJson(false);
-                                                    } catch (err) {
-                                                        setAdvancedJsonError((err as Error).message);
-                                                    }
-                                                }}
-                                            >
-                                                Apply
-                                            </Button>
-                                        </Stack>
+                                        </CollapsibleSection>
                                     </Paper>
                                 </Collapse>
                             </Box>
@@ -930,7 +828,7 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                 </Box>
             </Paper>
 
-            {/* Footer with Stats and Start Button - Isolated Bubble */}
+            {/* Footer with Stats and Start Button */}
             <Paper
                 elevation={4}
                 sx={{

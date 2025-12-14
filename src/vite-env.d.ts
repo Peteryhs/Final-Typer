@@ -80,13 +80,29 @@ interface StoredConfig {
   options: TypingOptions;
 }
 
+interface DebugLogEntry {
+  stepNumber: number;
+  action: string;
+  detail: string;
+  buffer: string;
+  caret: number;
+  level: 'info' | 'warn' | 'error' | 'debug';
+}
+
 interface ElectronAPI {
   startTyping: (text: string, options: TypingOptions) => Promise<void>;
   stopTyping: () => void;
   toggleOverlay: () => void;
+  setOverlayExpanded: (expanded: boolean) => void;
+  onOverlayCollapsed: (callback: () => void) => () => void;
   setConfig: (config: StoredConfig) => void;
   signalStart: () => Promise<void>;
   minimize: () => void;
   maximize: () => void;
   close: () => void;
+
+  // Debug API
+  onDebugLog: (callback: (log: DebugLogEntry) => void) => () => void;
+  setDebugEnabled: (enabled: boolean) => void;
+  setDisableDoubleTap: (disabled: boolean) => void;
 }

@@ -6,6 +6,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Overlay & State Management
   toggleOverlay: () => ipcRenderer.send('toggle-overlay'),
+  setOverlayExpanded: (expanded: boolean) => ipcRenderer.send('set-overlay-expanded', expanded),
+  onOverlayCollapsed: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('overlay-collapsed', handler);
+    return () => ipcRenderer.removeListener('overlay-collapsed', handler);
+  },
   setConfig: (config: any) => ipcRenderer.send('set-config', config),
   signalStart: () => ipcRenderer.invoke('signal-start'), // Starts using stored config
 
@@ -13,4 +19,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
+
+  // Debug API
+  onDebugLog: (callback: (log: any) => void) => {
+    const handler = (_event: any, log: any) => callback(log);
+    ipcRenderer.on('debug-log', handler);
+    return () => ipcRenderer.removeListener('debug-log', handler);
+  },
+  setDebugEnabled: (enabled: boolean) => ipcRenderer.send('set-debug-enabled', enabled),
+  setDisableDoubleTap: (disabled: boolean) => ipcRenderer.send('set-disable-double-tap', disabled),
 });

@@ -97,7 +97,7 @@ export function normalizeAdvancedSettings(input: Partial<TypingAdvancedSettings>
   // Fix sessions
   merged.fixSessionsEnabled = toBoolOr(merged.fixSessionsEnabled, DEFAULT_ADVANCED_SETTINGS.fixSessionsEnabled);
   merged.fixSessionIntervalWords = clamp(toNumberOr(merged.fixSessionIntervalWords, DEFAULT_ADVANCED_SETTINGS.fixSessionIntervalWords), 1, 500);
-  merged.fixSessionMaxFixes = clamp(toNumberOr(merged.fixSessionMaxFixes, DEFAULT_ADVANCED_SETTINGS.fixSessionMaxFixes), 1, 100);
+  merged.fixSessionMaxFixes = clamp(toNumberOr(merged.fixSessionMaxFixes, DEFAULT_ADVANCED_SETTINGS.fixSessionMaxFixes), 4, 20);
   merged.fixSessionPauseMinSeconds = clamp(
     toNumberOr(merged.fixSessionPauseMinSeconds, DEFAULT_ADVANCED_SETTINGS.fixSessionPauseMinSeconds),
     0,
@@ -110,8 +110,8 @@ export function normalizeAdvancedSettings(input: Partial<TypingAdvancedSettings>
   );
   merged.fixSessionCursorMoveDelaySeconds = clamp(
     toNumberOr(merged.fixSessionCursorMoveDelaySeconds, DEFAULT_ADVANCED_SETTINGS.fixSessionCursorMoveDelaySeconds),
-    0.02,
-    0.2,
+    0.001, // 1ms minimum
+    0.06,  // 60ms maximum
   );
 
   // Verification

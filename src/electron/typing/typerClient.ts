@@ -1,3 +1,12 @@
+/**
+ * SIMPLIFIED TyperClient - Robust communication with Typer.exe
+ * 
+ * This version focuses on reliability:
+ * - Shorter timeouts
+ * - Better error handling
+ * - Simpler protocol
+ */
+
 import { ChildProcess } from 'child_process';
 import * as readline from 'readline';
 
@@ -6,104 +15,150 @@ export type TyperAck = 'OK' | 'ERR';
 export interface TyperClient {
   ready: Promise<void>;
   send(payload: string): Promise<TyperAck>;
+  isAlive(): boolean;
 }
 
 export function createTyperClient(proc: ChildProcess): TyperClient {
-  // One ACK line per command sent to stdin.
   const pending: Array<{
     resolve: (ack: TyperAck) => void;
     reject: (err: Error) => void;
+    timeout: NodeJS.Timeout;
   }> = [];
 
   let isReady = false;
-  // If the helper doesn't speak the READY/OK/ERR protocol, we fall back to
-  // fire-and-forget writes and rely on optional clipboard verification.
-  let protocolEnabled = false;
+  let processAlive = true;
   let readyResolve!: () => void;
   let readyReject!: (err: Error) => void;
+
   const ready = new Promise<void>((resolve, reject) => {
     readyResolve = resolve;
     readyReject = reject;
   });
-  const readyTimeoutMs = 2000;
+
+  // Shorter timeout for readiness
   const readyTimeout = setTimeout(() => {
-    if (isReady) return;
-    // Backward-compatible: older Typer.exe builds didn't emit READY. Proceed.
-    isReady = true;
-    protocolEnabled = false;
-    readyResolve();
-  }, readyTimeoutMs);
+    if (!isReady) {
+      isReady = true;
+      console.warn('[Typer] No READY received, proceeding anyway');
+      readyResolve();
+    }
+  }, 1500);
 
-  const markReady = () => {
-    if (isReady) return;
-    isReady = true;
-    clearTimeout(readyTimeout);
-    protocolEnabled = true;
-    readyResolve();
-  };
-
+  // Handle stdout - parse ACK responses
   if (proc.stdout) {
     proc.stdout.setEncoding('utf8');
     const rl = readline.createInterface({ input: proc.stdout });
+
     rl.on('line', (line) => {
       const trimmed = line.trim();
+
       if (trimmed === 'READY') {
-        markReady();
+        if (!isReady) {
+          isReady = true;
+          clearTimeout(readyTimeout);
+          console.log('[Typer] Ready');
+          readyResolve();
+        }
         return;
       }
-      const ack: TyperAck | null = trimmed === 'OK' ? 'OK' : trimmed === 'ERR' ? 'ERR' : null;
+
+      // Handle OK/ERR
+      const ack = trimmed === 'OK' ? 'OK' : trimmed === 'ERR' ? 'ERR' : null;
       const next = pending.shift();
-      if (!next) return;
-      if (!ack) return next.reject(new Error(`Unexpected Typer ACK: ${line}`));
-      next.resolve(ack);
+
+      if (next) {
+        clearTimeout(next.timeout);
+        if (ack) {
+          next.resolve(ack);
+        } else {
+          next.reject(new Error(`Unexpected response: ${trimmed}`));
+        }
+      }
+    });
+
+    rl.on('close', () => {
+      processAlive = false;
+      failAll(new Error('Typer stdout closed'));
     });
   }
 
-  const failAll = (err: Error) => {
-    if (!isReady) readyReject(err);
-    while (pending.length) pending.shift()?.reject(err);
-  };
+  // Handle stderr
+  if (proc.stderr) {
+    proc.stderr.setEncoding('utf8');
+    proc.stderr.on('data', (data) => {
+      console.error('[Typer] Error:', data.toString().trim());
+    });
+  }
 
-  proc.on('error', (err) => failAll(err as Error));
-  proc.on('exit', (code) => failAll(new Error(`Typer exited (${code ?? 'unknown'})`)));
+  // Handle stdin errors
+  if (proc.stdin) {
+    proc.stdin.on('error', (err) => {
+      console.error('[Typer] stdin error:', err.message);
+      processAlive = false;
+      failAll(err);
+    });
+  }
 
-  const send = (payload: string): Promise<TyperAck> => {
-    if (!proc.stdin) return Promise.reject(new Error('Typer stdin not available'));
+  // Handle process errors
+  proc.on('error', (err) => {
+    console.error('[Typer] Process error:', err.message);
+    processAlive = false;
+    failAll(err);
+  });
 
-    if (!protocolEnabled) {
-      // Best-effort mode: no ACK expected.
-      proc.stdin.write(payload + '\n');
-      return Promise.resolve('OK');
+  proc.on('exit', (code) => {
+    console.log('[Typer] Exited with code:', code);
+    processAlive = false;
+    failAll(new Error(`Typer exited (${code})`));
+  });
+
+  function failAll(err: Error) {
+    if (!isReady) {
+      clearTimeout(readyTimeout);
+      readyReject(err);
+    }
+    while (pending.length) {
+      const p = pending.shift()!;
+      clearTimeout(p.timeout);
+      p.reject(err);
+    }
+  }
+
+  async function send(payload: string): Promise<TyperAck> {
+    if (!processAlive) {
+      throw new Error('Typer process is not alive');
+    }
+
+    if (!proc.stdin || proc.stdin.destroyed) {
+      throw new Error('Typer stdin not available');
     }
 
     return new Promise<TyperAck>((resolve, reject) => {
-      const entry = {
-        resolve: (ack: TyperAck) => resolve(ack),
-        reject: (err: Error) => reject(err),
-      };
-
-      // If Typer.exe is an older build (no ACK protocol) or stdout isn't hooked
-      // correctly, avoid hanging forever.
-      const timeoutMs = 3000;
+      // 2000ms timeout per command - allows for command queue processing at high WPM
+      // At very high speeds, commands can queue up in the pending array
       const timeout = setTimeout(() => {
-        const idx = pending.indexOf(entry);
+        const idx = pending.findIndex(p => p.timeout === timeout);
         if (idx >= 0) pending.splice(idx, 1);
-        reject(new Error(`Typer ACK timeout (${timeoutMs}ms)`));
-      }, timeoutMs);
+        console.error(`[Typer] Command timeout after 2000ms, pending queue size: ${pending.length}`);
+        reject(new Error('Typer timeout'));
+      }, 2000);
 
-      entry.resolve = (ack: TyperAck) => {
-        clearTimeout(timeout);
-        resolve(ack);
-      };
-      entry.reject = (err: Error) => {
-        clearTimeout(timeout);
-        reject(err);
-      };
+      pending.push({ resolve, reject, timeout });
 
-      pending.push(entry);
-      proc.stdin!.write(payload + '\n');
+      try {
+        proc.stdin!.write(payload + '\n');
+      } catch (err) {
+        clearTimeout(timeout);
+        pending.pop();
+        processAlive = false;
+        reject(new Error(`Write failed: ${(err as Error).message}`));
+      }
     });
-  };
+  }
 
-  return { ready, send };
+  function isAlive(): boolean {
+    return processAlive;
+  }
+
+  return { ready, send, isAlive };
 }

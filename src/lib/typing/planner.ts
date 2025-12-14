@@ -470,7 +470,12 @@ export function createTypingPlan(rawText: string, options: TypingOptions): Typin
     addPause((0.12 + rng.float() * 0.38) * adv.pauseScale, reason);
 
     // Deletion-based backtrack assumes we're at the end of the text.
-    pressKey('CTRL_END', 0.02);
+    // Use a longer delay (0.08s) and add a sync pause to ensure Google Docs
+    // (and other web apps) have finished processing the cursor move before
+    // we start backspacing. Without this, the cursor may still be mid-update
+    // when the first BACKSPACE fires, causing off-by-one deletion errors.
+    pressKey('CTRL_END', 0.08);
+    addPause(0.1, 'cursor-sync');
 
     // Track buffer size before correction to detect size changes.
     const bufferLengthBefore = buffer.length;
