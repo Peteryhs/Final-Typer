@@ -95,11 +95,16 @@ interface ElectronAPI {
   toggleOverlay: () => void;
   setOverlayExpanded: (expanded: boolean) => void;
   onOverlayCollapsed: (callback: () => void) => () => void;
+  onOverlayAutoShown: (callback: () => void) => () => void;
   setConfig: (config: StoredConfig) => void;
   signalStart: () => Promise<void>;
   minimize: () => void;
   maximize: () => void;
   close: () => void;
+
+  // Typing state & Auto-overlay
+  setTypingState: (typing: boolean) => void;
+  setAutoOverlayEnabled: (enabled: boolean) => void;
 
   // Debug API
   onDebugLog: (callback: (log: DebugLogEntry) => void) => () => void;

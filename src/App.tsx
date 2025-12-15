@@ -3,7 +3,7 @@ import {
   ThemeProvider, createTheme, CssBaseline,
   Box, Drawer, ListItemButton, ListItemIcon,
   Typography, IconButton, Button, TextField,
-  Paper, Divider, Stack,
+  Paper, Divider, Stack, Switch,
   CircularProgress, Tooltip, Grid
 } from '@mui/material';
 import {
@@ -340,6 +340,9 @@ function App() {
   const [activeTab, setActiveTab] = useState<'write' | 'settings'>('write');
   const [countdown, setCountdown] = useState<number | null>(null);
 
+  // Auto-overlay setting
+  const [autoOverlayEnabled, setAutoOverlayEnabled] = useStickyState(true, 'ft_auto_overlay');
+
   // Debug Panel State
   const {
     isDebugOpen,
@@ -365,6 +368,16 @@ function App() {
   useEffect(() => {
     window.electronAPI.setDisableDoubleTap(disableDoubleTap);
   }, [disableDoubleTap]);
+
+  // Sync typing state with main process (for auto-overlay)
+  useEffect(() => {
+    window.electronAPI.setTypingState(isTyping);
+  }, [isTyping]);
+
+  // Sync auto-overlay setting with main process
+  useEffect(() => {
+    window.electronAPI.setAutoOverlayEnabled(autoOverlayEnabled);
+  }, [autoOverlayEnabled]);
 
   useEffect(() => {
     const res = textAnalysis(text);
@@ -975,6 +988,20 @@ function App() {
                           A small triangle appears in the top-left corner for quick access to controls.
                         </Typography>
 
+                        {/* Auto-show overlay toggle */}
+                        <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, p: 1.5, bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 2 }}>
+                          <Box>
+                            <Typography variant="body2" fontWeight={600}>Auto-show Overlay</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              Show overlay when window is minimized during typing
+                            </Typography>
+                          </Box>
+                          <Switch
+                            checked={autoOverlayEnabled}
+                            onChange={(e) => setAutoOverlayEnabled(e.target.checked)}
+                          />
+                        </Stack>
+
                         <Button
                           variant="contained"
                           color="primary"
@@ -985,7 +1012,6 @@ function App() {
                             // Then toggle to overlay mode
                             window.electronAPI.toggleOverlay();
                           }}
-                          sx={{ mt: 2 }}
                         >
                           Switch to Overlay
                         </Button>

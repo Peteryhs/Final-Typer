@@ -23,6 +23,10 @@ let currentConfig: { text: string; options: any } | null = null;
 let debugEnabled = true; // Enabled by default during debug testing
 let disableDoubleTap = false;
 
+// Overlay auto-show state
+let isTypingActive = false;
+let autoOverlayEnabled = false;
+
 // Debug log sender (sends to renderer)
 export function sendDebugLog(log: {
   stepNumber: number;
@@ -137,7 +141,16 @@ app.whenReady().then(() => {
   createMainWindow();
 
   // Window Controls
-  ipcMain.on('window-minimize', () => mainWindow?.minimize());
+  ipcMain.on('window-minimize', () => {
+    mainWindow?.minimize();
+    // Auto-show overlay if typing is active and auto-overlay is enabled
+    if (isTypingActive && autoOverlayEnabled && mainWindow) {
+      if (!overlayWindow) createOverlayWindow();
+      else overlayWindow.show();
+      // Notify renderer that overlay was auto-shown
+      mainWindow.webContents.send('overlay-auto-shown');
+    }
+  });
   ipcMain.on('window-maximize', () => {
     if (mainWindow?.isMaximized()) {
       mainWindow.unmaximize();
@@ -146,6 +159,16 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.on('window-close', () => mainWindow?.close());
+
+  // Typing state tracking (from renderer)
+  ipcMain.on('set-typing-state', (event, typing: boolean) => {
+    isTypingActive = typing;
+  });
+
+  // Auto-overlay setting
+  ipcMain.on('set-auto-overlay-enabled', (event, enabled: boolean) => {
+    autoOverlayEnabled = enabled;
+  });
 
   // Helper to apply debug options
   const applyDebugOptions = (options: any) => {

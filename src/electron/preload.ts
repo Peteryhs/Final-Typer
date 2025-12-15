@@ -12,8 +12,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('overlay-collapsed', handler);
     return () => ipcRenderer.removeListener('overlay-collapsed', handler);
   },
+  onOverlayAutoShown: (callback: () => void) => {
+    const handler = () => callback();
+    ipcRenderer.on('overlay-auto-shown', handler);
+    return () => ipcRenderer.removeListener('overlay-auto-shown', handler);
+  },
   setConfig: (config: any) => ipcRenderer.send('set-config', config),
   signalStart: () => ipcRenderer.invoke('signal-start'), // Starts using stored config
+
+  // Typing state & Auto-overlay
+  setTypingState: (typing: boolean) => ipcRenderer.send('set-typing-state', typing),
+  setAutoOverlayEnabled: (enabled: boolean) => ipcRenderer.send('set-auto-overlay-enabled', enabled),
 
   // Window Controls
   minimize: () => ipcRenderer.send('window-minimize'),
@@ -29,3 +38,4 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setDebugEnabled: (enabled: boolean) => ipcRenderer.send('set-debug-enabled', enabled),
   setDisableDoubleTap: (disabled: boolean) => ipcRenderer.send('set-disable-double-tap', disabled),
 });
+
