@@ -3,6 +3,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 contextBridge.exposeInMainWorld('electronAPI', {
   startTyping: (text: string, options: any) => ipcRenderer.invoke('start-typing', text, options),
   stopTyping: () => ipcRenderer.send('stop-typing'),
+  pauseTyping: () => ipcRenderer.send('pause-typing'),
+  resumeTyping: () => ipcRenderer.send('resume-typing'),
+  getPauseState: () => ipcRenderer.invoke('get-pause-state'),
 
   // Overlay & State Management
   toggleOverlay: () => ipcRenderer.send('toggle-overlay'),
@@ -37,5 +40,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   setDebugEnabled: (enabled: boolean) => ipcRenderer.send('set-debug-enabled', enabled),
   setDisableDoubleTap: (disabled: boolean) => ipcRenderer.send('set-disable-double-tap', disabled),
+
+  // Pause state changes
+  onPauseStateChanged: (callback: (data: { isPaused: boolean; isTypingActive: boolean }) => void) => {
+    const handler = (_event: any, data: { isPaused: boolean; isTypingActive: boolean }) => {
+      console.log('Pause state changed in renderer:', data);
+      callback(data);
+    };
+    ipcRenderer.on('pause-state-changed', handler);
+    return () => ipcRenderer.removeListener('pause-state-changed', handler);
+  },
+  onResumeCountdown: (callback: (seconds: number | null) => void) => {
+    const handler = (_event: any, seconds: number | null) => callback(seconds);
+    ipcRenderer.on('resume-countdown', handler);
+    return () => ipcRenderer.removeListener('resume-countdown', handler);
+  },
 });
 

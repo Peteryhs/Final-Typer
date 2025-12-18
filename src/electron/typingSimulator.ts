@@ -6,8 +6,9 @@ import { createTypingPlanV2 as createTypingPlan, setDebugConfig } from '../lib/t
 import type { TypingOptions } from '../lib/typing/types';
 import { normalizeAdvancedSettings } from '../lib/typing/normalize';
 import { createTyperClient } from './typing/typerClient';
-import { executeTypingPlan, finalVerifyAndFix, setDebugLogSender } from './typing/executor';
+import { executeTypingPlan, finalVerifyAndFix, setDebugLogSender, setPauseCheckFunction } from './typing/executor';
 import { sendDebugLog } from './main';
+import { checkPauseState } from './main';
 
 // Configure debug logging for the planner
 // Set enabled: true to see detailed logs in the console
@@ -23,6 +24,9 @@ setDebugConfig({
 
 // Inject the debug log sender into the executor
 setDebugLogSender(sendDebugLog);
+
+// Inject the pause check function into the executor
+setPauseCheckFunction(checkPauseState);
 
 let typerProcess: ChildProcess | null = null;
 let isTyping = false;

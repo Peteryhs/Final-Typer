@@ -92,6 +92,9 @@ interface DebugLogEntry {
 interface ElectronAPI {
   startTyping: (text: string, options: TypingOptions) => Promise<void>;
   stopTyping: () => void;
+  pauseTyping: () => void;
+  resumeTyping: () => void;
+  getPauseState: () => Promise<{ isPaused: boolean; isTypingActive: boolean }>;
   toggleOverlay: () => void;
   setOverlayExpanded: (expanded: boolean) => void;
   onOverlayCollapsed: (callback: () => void) => () => void;
@@ -110,4 +113,8 @@ interface ElectronAPI {
   onDebugLog: (callback: (log: DebugLogEntry) => void) => () => void;
   setDebugEnabled: (enabled: boolean) => void;
   setDisableDoubleTap: (disabled: boolean) => void;
+
+  // Pause state changes
+  onPauseStateChanged: (callback: (data: { isPaused: boolean; isTypingActive: boolean }) => void) => () => void;
+  onResumeCountdown: (callback: (seconds: number | null) => void) => () => void;
 }

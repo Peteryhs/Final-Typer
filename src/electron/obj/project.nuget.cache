@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "dgSpecHash": "zctvWGw+LrY=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\peter\\Work\\Miscellaneous\\Projects\\Final-Typer\\src\\electron\\Typer.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.22\\microsoft.net.illink.tasks.8.0.22.nupkg.sha512",
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.netcore.app.ref\\8.0.22\\microsoft.netcore.app.ref.8.0.22.nupkg.sha512",
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\8.0.22\\microsoft.windowsdesktop.app.ref.8.0.22.nupkg.sha512",
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\8.0.22\\microsoft.aspnetcore.app.ref.8.0.22.nupkg.sha512",
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.netcore.app.host.win-arm64\\8.0.22\\microsoft.netcore.app.host.win-arm64.8.0.22.nupkg.sha512"
+  ],
+  "logs": []
+}

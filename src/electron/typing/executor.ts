@@ -101,6 +101,24 @@ type KeyName = 'ENTER' | 'BACKSPACE' | 'LEFT' | 'RIGHT' | 'END' | 'HOME' | 'CTRL
 // Utility Functions
 // ============================================================================
 
+async function checkPauseAndWait(signal: AbortSignal): Promise<void> {
+  if (pauseCheckFn) {
+    try {
+      console.log('[Executor] Checking pause state...');
+      await pauseCheckFn();
+      console.log('[Executor] Pause check completed, continuing...');
+    } catch (err) {
+      if (err instanceof Error && err.message === 'Aborted') {
+        console.log('[Executor] Pause check was aborted');
+        throw err;
+      }
+      console.error('[Executor] Pause check error:', err);
+    }
+  } else {
+    console.log('[Executor] No pause check function available');
+  }
+}
+
 function sleepMs(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new Error('Aborted'));
@@ -134,6 +152,13 @@ let sendDebugLogFn: ((log: any) => void) | null = null;
 // This will be called from typingSimulator to inject the sendDebugLog function
 export function setDebugLogSender(fn: (log: any) => void) {
   sendDebugLogFn = fn;
+}
+
+// Pause check function
+let pauseCheckFn: (() => Promise<void>) | null = null;
+
+export function setPauseCheckFunction(fn: () => Promise<void>) {
+  pauseCheckFn = fn;
 }
 
 interface LogContext {
@@ -482,6 +507,9 @@ export async function executeTypingPlan(
 
     if (signal.aborted) throw new Error('Aborted');
 
+    // Check for pause state before each step
+    await checkPauseAndWait(signal);
+
     // ========== Sequence Detection ==========
     if (detectSequenceStart(step, prevStep)) {
       seqCtx.inCorrectionSequence = true;
@@ -519,6 +547,9 @@ export async function executeTypingPlan(
       } else if (seqCtx.lastWasBackspace) {
         await sleepMs(config.backspaceSettleMs, signal);
       }
+
+      // Check for pause state before typing each character
+      await checkPauseAndWait(signal);
 
       // Send the character
       await sendCharacter(typer, step.char, config, signal);

@@ -7,7 +7,7 @@ import {
   CircularProgress, Tooltip, Grid
 } from '@mui/material';
 import {
-  PlayArrow, Stop, TextFields,
+  PlayArrow, Stop, Pause, TextFields,
   Settings, ContentPaste, Delete,
   FlashOn, Palette, Monitor,
   DarkMode, LightMode, OpenInFull,
@@ -90,12 +90,38 @@ const colorPalettes: Record<string, {
 interface OverlayModeProps {
   stats: TextAnalysisResult | null;
   textLength: number;
+  text: string;
+  speed: number;
+  speedMode: 'constant' | 'dynamic';
+  speedVariance: number;
+  mistakeRatePercent: number;
+  fatigueMode: boolean;
+  advanced: any;
 }
 
-function OverlayMode({ stats: _stats, textLength }: OverlayModeProps) {
+function OverlayMode({
+  stats: _stats,
+  textLength,
+  text,
+  speed,
+  speedMode,
+  speedVariance,
+  mistakeRatePercent,
+  fatigueMode,
+  advanced
+}: OverlayModeProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [countdown, setCountdown] = useState<number | null>(null);
+
+  useEffect(() => {
+    const unsub = window.electronAPI.onResumeCountdown((seconds: number | null) => {
+      setCountdown(seconds);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     // Listen for auto-collapse from main process (blur)
@@ -116,6 +142,54 @@ function OverlayMode({ stats: _stats, textLength }: OverlayModeProps) {
     return cleanup;
   }, [textLength]);
 
+  // Sync typing state from main process for overlay
+  useEffect(() => {
+    let isMounted = true;
+    let lastKnownTypingState = isTyping;
+    let lastKnownPauseState = isPaused;
+
+    const syncState = async () => {
+      try {
+        const state = await window.electronAPI.getPauseState();
+        if (isMounted) {
+          // Only update if state actually changed to avoid unnecessary re-renders
+          if (state.isTypingActive !== lastKnownTypingState || state.isPaused !== lastKnownPauseState) {
+            lastKnownTypingState = state.isTypingActive;
+            lastKnownPauseState = state.isPaused;
+            setIsTyping(state.isTypingActive);
+            setIsPaused(state.isPaused);
+            console.log('Overlay state sync:', state);
+          }
+        }
+      } catch (error) {
+        console.error('Error syncing overlay state:', error);
+      }
+    };
+
+    // Also listen for pause state changes
+    const handlePauseStateChange = (data: { isPaused: boolean; isTypingActive: boolean }) => {
+      if (isMounted) {
+        console.log('Overlay received pause state change:', data);
+        setIsTyping(data.isTypingActive);
+        setIsPaused(data.isPaused);
+        lastKnownTypingState = data.isTypingActive;
+        lastKnownPauseState = data.isPaused;
+      }
+    };
+
+    const pauseStateCleanup = window.electronAPI.onPauseStateChanged(handlePauseStateChange);
+    const interval = setInterval(syncState, 500); // Less frequent since we have event-based updates
+
+    // Initial sync
+    syncState();
+
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+      pauseStateCleanup();
+    };
+  }, []);
+
   const setExpanded = (expanded: boolean) => {
     if (isExpanded === expanded) return;
     setIsExpanded(expanded);
@@ -125,20 +199,75 @@ function OverlayMode({ stats: _stats, textLength }: OverlayModeProps) {
     }
   };
 
+  // Ref to prevent double-clicks on toggle button
+  const toggleInProgress = useRef(false);
+
   const handleToggleTyping = async () => {
-    if (isTyping) {
-      window.electronAPI.stopTyping();
-      setIsTyping(false);
-    } else {
-      setIsTyping(true);
-      setProgress(0); // Reset progress on start
-      try {
-        await window.electronAPI.signalStart();
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setIsTyping(false);
+    // Prevent double-clicks
+    if (toggleInProgress.current) {
+      console.log('Toggle already in progress, ignoring');
+      return;
+    }
+    toggleInProgress.current = true;
+
+    try {
+      // Get authoritative state from main process to avoid stale local state issues
+      const mainState = await window.electronAPI.getPauseState();
+      console.log('Overlay toggle typing - main state:', mainState, 'local state:', { isTyping, isPaused });
+
+      if (mainState.isTypingActive) {
+        if (mainState.isPaused) {
+          // Resume typing
+          console.log('Resuming typing from pause');
+          window.electronAPI.resumeTyping();
+        } else {
+          // Pause typing
+          console.log('Pausing typing');
+          window.electronAPI.pauseTyping();
+        }
+      } else {
+        // Start new typing session
+        console.log('Starting new typing session from overlay');
+        setProgress(0); // Reset progress on start
+
+        // First set the config to ensure we have the current text and options
+        if (!text.trim()) {
+          console.log('No text to type');
+          return;
+        }
+
+        const analysis = textAnalysis(text);
+        const calculatedMistakeRate = mistakeRatePercent / 100;
+
+        console.log('Setting config for overlay:', { text: text.slice(0, 50), speed, mistakeRate: calculatedMistakeRate });
+
+        // Set config for overlay mode
+        window.electronAPI.setConfig({
+          text,
+          options: {
+            speed,
+            speedMode,
+            speedVariance,
+            mistakeRate: calculatedMistakeRate,
+            fatigueMode,
+            analysis,
+            advanced
+          }
+        });
+
+        try {
+          console.log('Calling signalStart');
+          await window.electronAPI.signalStart();
+          console.log('signalStart completed');
+        } catch (e) {
+          console.error('Overlay start error:', e);
+        }
       }
+    } finally {
+      // Reset after a short delay to allow state to propagate
+      setTimeout(() => {
+        toggleInProgress.current = false;
+      }, 500);
     }
   };
 
@@ -255,7 +384,10 @@ function OverlayMode({ stats: _stats, textLength }: OverlayModeProps) {
                 value={progress * 100}
                 size={36}
                 thickness={4}
-                sx={{ color: 'primary.main' }}
+                sx={{
+                  color: isPaused ? 'warning.main' : 'primary.main',
+                  animation: isPaused ? 'none' : undefined
+                }}
               />
               <Typography
                 variant="caption"
@@ -264,12 +396,12 @@ function OverlayMode({ stats: _stats, textLength }: OverlayModeProps) {
                   top: '50%',
                   left: '50%',
                   transform: 'translate(-50%, -50%)',
-                  fontSize: '0.6rem',
+                  fontSize: countdown !== null ? '1rem' : '0.6rem',
                   fontWeight: 700,
-                  color: 'text.secondary',
+                  color: countdown !== null ? 'primary.main' : (isPaused ? 'warning.main' : 'text.secondary'),
                 }}
               >
-                {Math.round(progress * 100)}
+                {countdown !== null ? countdown : (isPaused ? '❚❚' : Math.round(progress * 100))}
               </Typography>
             </Box>
 
@@ -278,16 +410,16 @@ function OverlayMode({ stats: _stats, textLength }: OverlayModeProps) {
               onClick={handleToggleTyping}
               size="small"
               sx={{
-                bgcolor: isTyping ? 'error.main' : 'primary.main',
+                bgcolor: isTyping ? (isPaused ? 'success.main' : 'warning.main') : 'primary.main',
                 color: 'white',
                 width: 36,
                 height: 36,
                 '&:hover': {
-                  bgcolor: isTyping ? 'error.dark' : 'primary.dark',
+                  bgcolor: isTyping ? (isPaused ? 'success.dark' : 'warning.dark') : 'primary.dark',
                 },
               }}
             >
-              {isTyping ? <Stop sx={{ fontSize: 20 }} /> : <PlayArrow sx={{ fontSize: 20 }} />}
+              {isTyping ? (isPaused ? <PlayArrow sx={{ fontSize: 20 }} /> : <Pause sx={{ fontSize: 20 }} />) : <PlayArrow sx={{ fontSize: 20 }} />}
             </IconButton>
 
             {/* Open Main Window Button */}
@@ -337,6 +469,7 @@ function App() {
 
   const [stats, setStats] = useState<TextAnalysisResult | null>(null);
   const [isTyping, setIsTyping] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
   const [activeTab, setActiveTab] = useState<'write' | 'settings'>('write');
   const [countdown, setCountdown] = useState<number | null>(null);
 
@@ -364,10 +497,39 @@ function App() {
     return () => unsubscribe();
   }, [addLog]);
 
+  // Sync pause state from main process
+  useEffect(() => {
+    const syncPauseState = async () => {
+      if (isTyping) {
+        const state = await window.electronAPI.getPauseState();
+        setIsPaused(state.isPaused);
+      }
+    };
+
+    const interval = setInterval(syncPauseState, 500); // Check every 500ms
+    return () => clearInterval(interval);
+  }, [isTyping]);
+
   // Sync disable-double-tap setting with main process
   useEffect(() => {
     window.electronAPI.setDisableDoubleTap(disableDoubleTap);
   }, [disableDoubleTap]);
+
+  // Listen for pause state changes from main process (only when not in overlay mode)
+  useEffect(() => {
+    if (isOverlay) return; // Don't listen in overlay mode, the OverlayMode component handles it
+
+    const handlePauseStateChange = (data: { isPaused: boolean; isTypingActive: boolean }) => {
+      console.log('Main app received pause state change:', data);
+      setIsPaused(data.isPaused);
+      setIsTyping(data.isTypingActive);
+    };
+
+    // Listen for pause state changes
+    const cleanup = window.electronAPI.onPauseStateChanged(handlePauseStateChange);
+
+    return cleanup;
+  }, [isOverlay]);
 
   // Sync typing state with main process (for auto-overlay)
   useEffect(() => {
@@ -378,6 +540,14 @@ function App() {
   useEffect(() => {
     window.electronAPI.setAutoOverlayEnabled(autoOverlayEnabled);
   }, [autoOverlayEnabled]);
+
+  // Listen for resume countdown
+  useEffect(() => {
+    const unsub = window.electronAPI.onResumeCountdown((seconds: number | null) => {
+      setCountdown(seconds);
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const res = textAnalysis(text);
@@ -495,7 +665,17 @@ function App() {
     return (
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <OverlayMode stats={stats} textLength={text.length} />
+        <OverlayMode
+          stats={stats}
+          textLength={text.length}
+          text={text}
+          speed={speed}
+          speedMode={speedMode}
+          speedVariance={speedVariance}
+          mistakeRatePercent={mistakeRatePercent}
+          fatigueMode={fatigueMode}
+          advanced={advanced}
+        />
       </ThemeProvider>
     );
   }
@@ -561,6 +741,7 @@ function App() {
     if (!text.trim()) return;
 
     setIsTyping(true);
+    setIsPaused(false);
 
     // Countdown visual logic
     let count = 3;
@@ -598,7 +779,38 @@ function App() {
   const handleStop = () => {
     window.electronAPI.stopTyping();
     setIsTyping(false);
+    setIsPaused(false);
     setCountdown(null);
+  };
+  // Ref to prevent double-clicks on pause/resume
+  const pauseResumeInProgress = useRef(false);
+
+  const handlePauseResume = async () => {
+    // Prevent double-clicks
+    if (pauseResumeInProgress.current) {
+      console.log('Pause/resume already in progress, ignoring');
+      return;
+    }
+    pauseResumeInProgress.current = true;
+
+    try {
+      // Get authoritative state from main process
+      const mainState = await window.electronAPI.getPauseState();
+      console.log('Main app pause/resume - main state:', mainState, 'local:', { isPaused });
+
+      if (mainState.isPaused) {
+        console.log('Resuming typing...');
+        window.electronAPI.resumeTyping();
+      } else {
+        console.log('Pausing typing...');
+        window.electronAPI.pauseTyping();
+      }
+    } finally {
+      // Reset after a short delay to allow state to propagate
+      setTimeout(() => {
+        pauseResumeInProgress.current = false;
+      }, 500);
+    }
   };
 
   const handlePaste = async () => {
@@ -715,12 +927,12 @@ function App() {
                 </IconButton>
               </Tooltip>
 
-              <Tooltip title={isTyping ? "Active" : "Idle"}>
+              <Tooltip title={isTyping ? (isPaused ? "Paused" : "Active") : "Idle"}>
                 <Box
                   sx={{
                     width: 12, height: 12, borderRadius: '50%',
-                    bgcolor: isTyping ? 'success.main' : 'rgba(255,255,255,0.1)',
-                    boxShadow: isTyping ? '0 0 10px rgba(181, 204, 186, 0.5)' : 'none',
+                    bgcolor: isTyping ? (isPaused ? 'warning.main' : 'success.main') : 'rgba(255,255,255,0.1)',
+                    boxShadow: isTyping ? (isPaused ? '0 0 10px rgba(255, 193, 7, 0.5)' : '0 0 10px rgba(181, 204, 186, 0.5)') : 'none',
                     transition: 'all 0.5s ease'
                   }}
                 />
@@ -830,26 +1042,75 @@ function App() {
                               </Typography>
                             </motion.div>
                           ) : (
-                            <Stack spacing={4} alignItems="center">
+                            <Stack spacing={4} alignItems="center" sx={{ width: '100%' }}>
                               <Box sx={{ position: 'relative' }}>
-                                <CircularProgress size={100} thickness={3} sx={{ color: 'primary.main' }} />
+                                <CircularProgress
+                                  size={100}
+                                  thickness={3}
+                                  sx={{
+                                    color: isPaused ? 'text.disabled' : 'primary.main',
+                                    '& .MuiCircularProgress-circle': {
+                                      animationPlayState: isPaused ? 'paused' : 'running',
+                                    },
+                                    '& svg': {
+                                      animationPlayState: isPaused ? 'paused' : 'running',
+                                    },
+                                  }}
+                                />
                                 <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                  <FlashOn sx={{ fontSize: 40, color: 'primary.main' }} />
+                                  {isPaused ? (
+                                    <Pause sx={{ fontSize: 40, color: 'text.disabled' }} />
+                                  ) : (
+                                    <FlashOn sx={{ fontSize: 40, color: 'primary.main' }} />
+                                  )}
                                 </Box>
                               </Box>
-                              <Button
-                                component={motion.button}
-                                whileHover={{ scale: 1.05 }}
-                                whileTap={{ scale: 0.95 }}
-                                variant="contained"
-                                color="error"
-                                size="large"
-                                startIcon={<Stop />}
-                                onClick={handleStop}
-                                sx={{ borderRadius: 100, px: 4, py: 1.5, fontSize: '1.1rem' }}
+                              <Stack
+                                direction={{ xs: 'column', md: 'row' }}
+                                spacing={2}
+                                sx={{ width: '100%', maxWidth: 400, px: 2 }}
                               >
-                                Stop
-                              </Button>
+                                <Button
+                                  component={motion.button}
+                                  whileHover={{ scale: 1.05 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  variant="contained"
+                                  color={isPaused ? "success" : "warning"}
+                                  size="large"
+                                  startIcon={isPaused ? <PlayArrow /> : <Pause />}
+                                  onClick={handlePauseResume}
+                                  sx={{
+                                    borderRadius: 100,
+                                    px: 4,
+                                    py: 1.5,
+                                    fontSize: '1.1rem',
+                                    flex: 1,
+                                    minWidth: 140,
+                                  }}
+                                >
+                                  {isPaused ? "Resume" : "Pause"}
+                                </Button>
+                                <Button
+                                  component={motion.button}
+                                  whileHover={{ scale: 1.05 }}
+                                  whileTap={{ scale: 0.95 }}
+                                  variant="contained"
+                                  color="error"
+                                  size="large"
+                                  startIcon={<Stop />}
+                                  onClick={handleStop}
+                                  sx={{
+                                    borderRadius: 100,
+                                    px: 4,
+                                    py: 1.5,
+                                    fontSize: '1.1rem',
+                                    flex: 1,
+                                    minWidth: 140,
+                                  }}
+                                >
+                                  Stop
+                                </Button>
+                              </Stack>
                             </Stack>
                           )}
                         </Box>
@@ -880,8 +1141,10 @@ function App() {
                     advanced={advanced}
                     setAdvanced={setAdvanced}
                     handleStart={handleStart}
+                    handlePauseResume={handlePauseResume}
                     text={text}
                     isTyping={isTyping}
+                    isPaused={isPaused}
                     stats={stats}
                     estimatedTimeStr={estimatedTimeStr}
                   />

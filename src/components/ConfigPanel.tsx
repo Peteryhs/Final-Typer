@@ -5,7 +5,7 @@ import {
 } from '@mui/material';
 import {
     AutoAwesome, Tune, AccessTime, ErrorOutline,
-    Science, ExpandLess, ExpandMore, PlayArrow,
+    Science, ExpandLess, ExpandMore, PlayArrow, Pause,
     Speed, Psychology, Create, Refresh, Verified
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
@@ -33,8 +33,10 @@ interface ConfigPanelProps {
     advanced: TypingAdvancedSettings;
     setAdvanced: React.Dispatch<React.SetStateAction<TypingAdvancedSettings>>;
     handleStart: () => void;
+    handlePauseResume: () => void;
     text: string;
     isTyping: boolean;
+    isPaused: boolean;
     stats: { word_count: number; character_count: number } | null;
     estimatedTimeStr: string;
 }
@@ -171,10 +173,10 @@ export default function ConfigPanel(props: ConfigPanelProps) {
         speedMode, setSpeedMode,
         speedVariance, setSpeedVariance,
         mistakeRatePercent, setMistakeRatePercent,
-        setFatigueMode,
+        setFatigueMode, // Not used directly in this component
         showAdvanced, setShowAdvanced,
         advanced, setAdvanced,
-        handleStart, text, isTyping,
+        handleStart, handlePauseResume, text, isTyping, isPaused,
         stats, estimatedTimeStr
     } = props;
 
@@ -864,26 +866,48 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                     </Box>
                 </Stack>
 
-                <Button
-                    component={motion.button}
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    fullWidth
-                    variant="contained"
-                    color="primary"
-                    onClick={handleStart}
-                    disabled={!text || isTyping}
-                    startIcon={<PlayArrow sx={{ fontSize: '1rem' }} />}
-                    sx={{
-                        py: 1,
-                        fontSize: '0.85rem',
-                        borderRadius: 2,
-                        fontWeight: 600,
-                        boxShadow: '0 4px 12px rgba(var(--mui-palette-primary-mainChannel), 0.4)'
-                    }}
-                >
-                    Start Engine
-                </Button>
+                {isTyping ? (
+                    <Button
+                        component={motion.button}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        fullWidth
+                        variant="contained"
+                        color={isPaused ? "success" : "warning"}
+                        onClick={handlePauseResume}
+                        startIcon={isPaused ? <PlayArrow sx={{ fontSize: '1rem' }} /> : <Pause sx={{ fontSize: '1rem' }} />}
+                        sx={{
+                            py: 1,
+                            fontSize: '0.85rem',
+                            borderRadius: 2,
+                            fontWeight: 600,
+                            boxShadow: '0 4px 12px rgba(var(--mui-palette-primary-mainChannel), 0.4)'
+                        }}
+                    >
+                        {isPaused ? "Resume" : "Pause"}
+                    </Button>
+                ) : (
+                    <Button
+                        component={motion.button}
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        fullWidth
+                        variant="contained"
+                        color="primary"
+                        onClick={handleStart}
+                        disabled={!text}
+                        startIcon={<PlayArrow sx={{ fontSize: '1rem' }} />}
+                        sx={{
+                            py: 1,
+                            fontSize: '0.85rem',
+                            borderRadius: 2,
+                            fontWeight: 600,
+                            boxShadow: '0 4px 12px rgba(var(--mui-palette-primary-mainChannel), 0.4)'
+                        }}
+                    >
+                        Start Engine
+                    </Button>
+                )}
             </Paper>
         </Box >
     );
