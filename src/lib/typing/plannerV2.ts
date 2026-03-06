@@ -60,6 +60,12 @@ function debug(category: keyof Omit<DebugConfig, 'enabled' | 'validateAfterEvery
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
+const resolveHumanizationRate = (options: TypingOptions): number => {
+  const legacyRate = typeof options.mistakeRate === 'number' ? options.mistakeRate : 0;
+  const explicitRate = typeof options.humanizationRate === 'number' ? options.humanizationRate : legacyRate;
+  return clamp(explicitRate, 0, 1);
+};
+
 function pickWeighted(rnd: () => number, weights: Array<{ key: string; w: number }>): string {
   const total = weights.reduce((s, x) => s + Math.max(0, x.w), 0);
   if (total <= 0) return weights[0]?.key ?? '';
@@ -436,12 +442,21 @@ export function createTypingPlanV2(rawText: string, options: TypingOptions): Typ
   // Initialize RNG
   const seed = options.seed ?? ((hashStringToSeed(normalizedText) ^ (Date.now() & 0xffffffff)) >>> 0);
   const rng = createRng(seed);
+  const effectiveMistakeRate = resolveHumanizationRate(options);
+  const effectiveSynonymReplaceChance = clamp(adv.synonymReplaceChance * effectiveMistakeRate, 0, 1);
+  const allowTextManipulationErrors = effectiveMistakeRate > 0;
 
   debug('logStateValidation', `Starting plan generation for ${normalizedText.length} chars, seed=${seed}`);
 
   // Extract word spans for synonym detection
   const wordSpans = extractWordSpans(normalizedText);
-  const synonymAtStart = planSynonymSubstitutions(wordSpans, adv, rng);
+  const synonymAtStart = planSynonymSubstitutions(
+    wordSpans,
+    adv,
+    rng,
+    allowTextManipulationErrors,
+    effectiveSynonymReplaceChance,
+  );
 
   // Initialize state
   const buffer = new BufferState();
@@ -462,8 +477,7 @@ export function createTypingPlanV2(rawText: string, options: TypingOptions): Typ
   let baseWpm = clamp(options.speed, 10, 999);
   let driftTargetWpm = baseWpm;
   let currentWpm = baseWpm;
-  const driftEveryChars = 12;
-  const driftSmoothing = 0.12;
+  const driftEveryChars = 6;
 
   // Burst tracking
   const nextBurstLengthWords = () => rng.int(adv.burstWordsMin, adv.burstWordsMax);
@@ -505,10 +519,11 @@ export function createTypingPlanV2(rawText: string, options: TypingOptions): Typ
   };
 
   const sampleBackspaceDelaySeconds = () =>
-    clamp(sampleLogNormalSeconds(adv.backspaceDelaySeconds, 0.18, rng.normal), 0.01, 0.35);
+    clamp(sampleLogNormalSeconds(adv.backspaceDelaySeconds, 0.18, rng.normal), 0.0001, 0.002);
 
   const sampleMicroPauseSeconds = () => {
-    if (rng.float() >= adv.microPauseChance) return 0;
+    const effectiveMicroPauseChance = clamp(adv.microPauseChance * effectiveMistakeRate, 0, 1);
+    if (rng.float() >= effectiveMicroPauseChance) return 0;
     return (adv.microPauseMinSeconds + rng.float() * (adv.microPauseMaxSeconds - adv.microPauseMinSeconds)) * adv.pauseScale;
   };
 
@@ -575,7 +590,7 @@ export function createTypingPlanV2(rawText: string, options: TypingOptions): Typ
     const toFix = allFixesWithPositions.slice(0, Math.min(allFixesWithPositions.length, maxFixes));
 
     const carefulSigma = clamp(currentDelaySigma() * 0.75, 0.02, 0.65);
-    const cursorDelay = clamp(adv.fixSessionCursorMoveDelaySeconds, 0.04, 0.15);
+    const cursorDelay = clamp(adv.fixSessionCursorMoveDelaySeconds, 0.0001, 0.002);
 
     for (const { fix, pos } of toFix) {
       // Re-verify position - it might have shifted if previous fixes changed the buffer
@@ -702,7 +717,7 @@ export function createTypingPlanV2(rawText: string, options: TypingOptions): Typ
 
   const shouldIntroduceMistake = (ch: string, currentIndex: number): boolean => {
     if (openMistake) return false;
-    const base = clamp(options.mistakeRate, 0, 1);
+    const base = effectiveMistakeRate;
     if (base <= 0) return false;
     if (ch === '\n') return false;
 
@@ -779,11 +794,13 @@ export function createTypingPlanV2(rawText: string, options: TypingOptions): Typ
       if (adv.burstEnabled) {
         burstWordsRemaining--;
         if (burstWordsRemaining <= 0) {
-          emitter.addPause(
-            adv.burstThinkingPauseMinSeconds +
-            rng.float() * (adv.burstThinkingPauseMaxSeconds - adv.burstThinkingPauseMinSeconds),
-            'burst-break',
-          );
+          if (rng.float() < effectiveMistakeRate) {
+            emitter.addPause(
+              adv.burstThinkingPauseMinSeconds +
+              rng.float() * (adv.burstThinkingPauseMaxSeconds - adv.burstThinkingPauseMinSeconds),
+              'burst-break',
+            );
+          }
           burstWordsRemaining = nextBurstLengthWords();
         }
       }
@@ -821,6 +838,8 @@ export function createTypingPlanV2(rawText: string, options: TypingOptions): Typ
       driftTargetWpm = clamp(baseWpm * (1 + pct), 10, 999);
     }
     if (options.speedMode === 'dynamic') {
+      const v = clamp(options.speedVariance, 0, 1);
+      const driftSmoothing = 0.18 + 0.42 * v;
       currentWpm += (driftTargetWpm - currentWpm) * driftSmoothing;
     } else {
       currentWpm = baseWpm;
@@ -1032,10 +1051,12 @@ function planSynonymSubstitutions(
   wordSpans: Array<{ start: number; end: number; raw: string; lower: string }>,
   adv: TypingAdvancedSettings,
   rng: { float: () => number; int: (a: number, b: number) => number },
+  allowTextManipulationErrors: boolean,
+  effectiveSynonymReplaceChance: number,
 ): Map<number, { end: number; original: string; typed: string; wordOrdinal: number }> {
   const synonymAtStart = new Map<number, { end: number; original: string; typed: string; wordOrdinal: number }>();
 
-  if (!adv.synonymReplaceEnabled || adv.synonymReplaceChance <= 0) {
+  if (!allowTextManipulationErrors || !adv.synonymReplaceEnabled || effectiveSynonymReplaceChance <= 0) {
     return synonymAtStart;
   }
 
@@ -1043,7 +1064,7 @@ function planSynonymSubstitutions(
     const span = wordSpans[wi]!;
     const synonyms = BASIC_SYNONYMS[span.lower];
     if (!synonyms || synonyms.length === 0) continue;
-    if (rng.float() >= adv.synonymReplaceChance) continue;
+    if (rng.float() >= effectiveSynonymReplaceChance) continue;
 
     const pool = synonyms.filter((s) => s.toLowerCase() !== span.lower);
     const picked = (pool.length ? pool : synonyms)[rng.int(0, (pool.length ? pool : synonyms).length - 1)]!;

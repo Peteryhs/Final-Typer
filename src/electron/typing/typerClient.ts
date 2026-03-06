@@ -86,7 +86,20 @@ export function createTyperClient(proc: ChildProcess): TyperClient {
   if (proc.stderr) {
     proc.stderr.setEncoding('utf8');
     proc.stderr.on('data', (data) => {
-      console.error('[Typer] Error:', data.toString().trim());
+      const lines: string[] = data
+        .toString()
+        .split(/\r?\n/)
+        .map((line: string) => line.trim())
+        .filter(Boolean);
+
+      for (const line of lines) {
+        if (line.includes('USER_KEYBOARD_INPUT') || line.includes('USER_INPUT')) continue;
+        if (line.startsWith('HOOK_FAIL:')) {
+          console.error('[Typer] Input hook setup failed:', line);
+          continue;
+        }
+        console.error('[Typer] Error:', line);
+      }
     });
   }
 

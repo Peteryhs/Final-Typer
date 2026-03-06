@@ -34,7 +34,7 @@ export const DEFAULT_ADVANCED_SETTINGS: TypingAdvancedSettings = {
   reflexRate: 0.10,
   reflexHesitationMinSeconds: 0.10,
   reflexHesitationMaxSeconds: 0.28,
-  backspaceDelaySeconds: 0.05,
+  backspaceDelaySeconds: 0.0005,
   realizationBaseChance: 0.025,
   realizationSensitivity: 0.035,
   realizationMinDelayChars: 2,
@@ -54,9 +54,5 @@ export const DEFAULT_ADVANCED_SETTINGS: TypingAdvancedSettings = {
   fixSessionMaxFixes: 10,
   fixSessionPauseMinSeconds: 0.55,
   fixSessionPauseMaxSeconds: 1.35,
-  fixSessionCursorMoveDelaySeconds: 0.01,
-
-  finalVerifyViaClipboard: true,
-  finalVerifyMaxAttempts: 4,
-  finalRewriteOnMismatch: true,
+  fixSessionCursorMoveDelaySeconds: 0.0002,
 };

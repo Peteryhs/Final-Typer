@@ -65,19 +65,16 @@ export interface TypingAdvancedSettings {
   fixSessionPauseMinSeconds: number;
   fixSessionPauseMaxSeconds: number;
   fixSessionCursorMoveDelaySeconds: number;
-
-  // Final verification / reconciliation (Electron can optionally read-back via clipboard).
-  finalVerifyViaClipboard: boolean;
-  finalVerifyMaxAttempts: number;
-  finalRewriteOnMismatch: boolean;
 }
 
 export interface TypingOptions {
   speed: number; // WPM base
   speedMode: SpeedMode;
   speedVariance: number; // 0..1
-  mistakeRate: number; // 0..1
+  humanizationRate?: number; // 0..1, primary control for errors + random pauses
+  mistakeRate: number; // 0..1, legacy alias for compatibility
   fatigueMode: boolean;
+  keyboardGateEnabled?: boolean;
   analysis: TextAnalysisResult;
   seed?: number;
   advanced?: Partial<TypingAdvancedSettings>;

@@ -6,9 +6,10 @@ import { createTypingPlanV2 as createTypingPlan, setDebugConfig } from '../lib/t
 import type { TypingOptions } from '../lib/typing/types';
 import { normalizeAdvancedSettings } from '../lib/typing/normalize';
 import { createTyperClient } from './typing/typerClient';
-import { executeTypingPlan, finalVerifyAndFix, setDebugLogSender, setPauseCheckFunction } from './typing/executor';
+import { executeTypingPlan, setDebugLogSender, setPauseCheckFunction } from './typing/executor';
 import { sendDebugLog } from './main';
 import { checkPauseState } from './main';
+import { notifyUserInputActivity } from './main';
 
 // Configure debug logging for the planner
 // Set enabled: true to see detailed logs in the console
@@ -45,8 +46,34 @@ export async function startTyping(text: string, options: TypingOptions) {
     ? path.join(process.resourcesPath, 'Typer.exe')
     : path.join(__dirname, '../../../src/electron/Typer.exe');
 
+  let stderrBuffer = '';
+  let lastUserInputAtMs = 0;
+  const onTyperStderr = (chunk: string | Buffer) => {
+    stderrBuffer += chunk.toString();
+    const parts = stderrBuffer.split(/\r?\n/);
+    stderrBuffer = parts.pop() ?? '';
+
+    for (const rawLine of parts) {
+      const line = rawLine.trim();
+      const isKeyboardActivity = line.includes('USER_KEYBOARD_INPUT') || line.includes('USER_INPUT');
+      if (!isKeyboardActivity) continue;
+
+      const now = Date.now();
+      if (now - lastUserInputAtMs < 120) continue;
+      lastUserInputAtMs = now;
+
+      notifyUserInputActivity();
+    }
+  };
+
   try {
-    typerProcess = spawn(typerPath);
+    typerProcess = spawn(typerPath, [], {
+      env: {
+        ...process.env,
+        FT_BLOCK_USER_INPUT: request.keyboardGateEnabled ? '1' : '0',
+      },
+    });
+    typerProcess.stderr?.on('data', onTyperStderr);
 
     // Handle spawn errors
     typerProcess.on('error', (err) => {
@@ -61,14 +88,15 @@ export async function startTyping(text: string, options: TypingOptions) {
     if (fixSessionSteps > 0) {
       console.log(`[FinalTyper] Fix sessions planned: ${fixSessionSteps}`);
     }
-    const { localTypedText } = await executeTypingPlan(typer, plan, signal);
-
-    await finalVerifyAndFix(typer, plan.normalizedText, localTypedText, adv, signal);
+    await executeTypingPlan(typer, plan, signal);
   } catch (err) {
     if ((err as Error).message !== 'Aborted') {
       console.error(err);
     }
   } finally {
+    if (typerProcess?.stderr) {
+      typerProcess.stderr.off('data', onTyperStderr);
+    }
     isTyping = false;
     abortController = null;
     typerProcess?.kill();

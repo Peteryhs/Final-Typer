@@ -131,7 +131,7 @@ run('synonymReplace (live) introduces backspaces but ends correct', () => {
     speed: 90,
     speedMode: 'constant',
     speedVariance: 0.2,
-    mistakeRate: 0,
+    mistakeRate: 1,
     fatigueMode: false,
     analysis,
     seed: 42,
@@ -219,7 +219,7 @@ run('synonymReplace (backtrack) triggers a later correction', () => {
     speed: 85,
     speedMode: 'constant',
     speedVariance: 0.1,
-    mistakeRate: 0,
+    mistakeRate: 1,
     fatigueMode: false,
     analysis,
     seed: 99,
@@ -237,6 +237,80 @@ run('synonymReplace (backtrack) triggers a later correction', () => {
 
   const hasSynonymCorrectionPause = plan.steps.some((s) => s.type === 'pause' && (s as any).reason === 'synonym-realization');
   assert.ok(hasSynonymCorrectionPause, 'expected a synonym backtrack correction pause to occur');
+});
+
+run('mistakeRate=0 disables synonym text manipulations', () => {
+  const text = 'Quick brown fox jumps.';
+  const analysis = textAnalysis(text);
+  const plan = createTypingPlan(text, {
+    speed: 85,
+    speedMode: 'constant',
+    speedVariance: 0.1,
+    mistakeRate: 0,
+    fatigueMode: false,
+    analysis,
+    seed: 99,
+    advanced: {
+      synonymReplaceEnabled: true,
+      synonymReplaceChance: 1,
+      synonymCorrectionMode: 'backtrack',
+      synonymBacktrackMinWords: 1,
+      synonymBacktrackMaxWords: 1,
+    },
+  });
+
+  const typed = applySteps(plan.steps as any);
+  assert.equal(typed, normalizeTextForTyping(text));
+
+  const hasSynonymCorrectionPause = plan.steps.some((s) => s.type === 'pause' && (s as any).reason === 'synonym-realization');
+  assert.equal(hasSynonymCorrectionPause, false, 'expected no synonym backtrack when mistakeRate is zero');
+});
+
+run('random micro pauses scale with humanization rate', () => {
+  const text = 'Plain words without punctuation';
+  const analysis = textAnalysis(text);
+
+  const low = createTypingPlan(text, {
+    speed: 80,
+    speedMode: 'constant',
+    speedVariance: 0,
+    humanizationRate: 0,
+    mistakeRate: 0,
+    fatigueMode: false,
+    analysis,
+    seed: 11,
+    advanced: {
+      microPauseChance: 1,
+      microPauseMinSeconds: 0.05,
+      microPauseMaxSeconds: 0.05,
+      burstEnabled: false,
+      synonymReplaceEnabled: false,
+    },
+  });
+
+  const high = createTypingPlan(text, {
+    speed: 80,
+    speedMode: 'constant',
+    speedVariance: 0,
+    humanizationRate: 1,
+    mistakeRate: 1,
+    fatigueMode: false,
+    analysis,
+    seed: 11,
+    advanced: {
+      microPauseChance: 1,
+      microPauseMinSeconds: 0.05,
+      microPauseMaxSeconds: 0.05,
+      burstEnabled: false,
+      synonymReplaceEnabled: false,
+    },
+  });
+
+  const lowMicro = low.steps.filter((s) => s.type === 'pause' && (s as any).reason === 'micro').length;
+  const highMicro = high.steps.filter((s) => s.type === 'pause' && (s as any).reason === 'micro').length;
+
+  assert.equal(lowMicro, 0, 'expected no random micro pauses at humanizationRate=0');
+  assert.ok(highMicro > 0, 'expected random micro pauses at humanizationRate=1');
 });
 
 run('estimatedSeconds equals the sum of step timings', () => {

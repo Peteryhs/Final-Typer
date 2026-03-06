@@ -25,18 +25,30 @@ let disableDoubleTap = false;
 
 // Overlay auto-show state
 let autoOverlayEnabled = false;
+const KEYBOARD_GATE_IDLE_MS = 600;
+
+type PauseReason = 'none' | 'manual' | 'auto';
 
 // Typing state - centralized state management
 const typingState = {
   isActive: false,
   isPaused: false,
   isResuming: false,
+  pauseReason: 'none' as PauseReason,
+  keyboardGateEnabled: false,
+  keyboardGateTimer: null as NodeJS.Timeout | null,
   pauseResolve: null as (() => void) | null,
 
   reset() {
+    if (this.keyboardGateTimer) {
+      clearTimeout(this.keyboardGateTimer);
+      this.keyboardGateTimer = null;
+    }
     this.isActive = false;
     this.isPaused = false;
     this.isResuming = false;
+    this.pauseReason = 'none';
+    this.keyboardGateEnabled = false;
     this.pauseResolve = null;
   },
 
@@ -49,10 +61,56 @@ const typingState = {
       isActive: this.isActive,
       isPaused: this.isPaused,
       isResuming: this.isResuming,
+      pauseReason: this.pauseReason,
+      keyboardGateEnabled: this.keyboardGateEnabled,
       hasPauseResolve: this.pauseResolve !== null
     };
   }
 };
+
+function clearKeyboardGateTimer() {
+  if (!typingState.keyboardGateTimer) return;
+  clearTimeout(typingState.keyboardGateTimer);
+  typingState.keyboardGateTimer = null;
+}
+
+function armKeyboardGateTimer() {
+  if (!typingState.keyboardGateEnabled || !typingState.isActive) return;
+  clearKeyboardGateTimer();
+  typingState.keyboardGateTimer = setTimeout(() => {
+    if (!typingState.isActive) return;
+    if (typingState.isPaused) return;
+
+    typingState.cancelResume();
+    typingState.isPaused = true;
+    typingState.pauseReason = 'auto';
+    console.log('[Main] Keyboard gate idle: AUTO-PAUSED');
+    broadcastState();
+  }, KEYBOARD_GATE_IDLE_MS);
+}
+
+function setSessionKeyboardGate(options: any) {
+  typingState.keyboardGateEnabled = Boolean(options?.keyboardGateEnabled);
+  clearKeyboardGateTimer();
+}
+
+function resumeFromPause(reason: 'manual' | 'keyboard-activity') {
+  typingState.isPaused = false;
+  typingState.pauseReason = 'none';
+  typingState.isResuming = false;
+
+  if (typingState.pauseResolve) {
+    typingState.pauseResolve();
+    typingState.pauseResolve = null;
+  }
+
+  if (typingState.keyboardGateEnabled) {
+    armKeyboardGateTimer();
+  }
+
+  console.log(`[Main] Typing RESUMED (${reason})`);
+  broadcastState();
+}
 
 // Helper to broadcast state to all windows
 function broadcastState() {
@@ -80,6 +138,43 @@ export function sendDebugLog(log: {
   } catch (e) {
     // Ignore errors (window might be closed)
   }
+}
+
+export function requestAutoPause(reason: string = 'user-input'): boolean {
+  if (!typingState.isActive) return false;
+  if (typingState.isPaused) return false;
+
+  typingState.cancelResume();
+  typingState.isPaused = true;
+  typingState.pauseReason = 'auto';
+  clearKeyboardGateTimer();
+  console.log(`[Main] Typing AUTO-PAUSED (${reason})`);
+  mainWindow?.webContents.send('auto-paused', { reason });
+  overlayWindow?.webContents.send('auto-paused', { reason });
+  broadcastState();
+  return true;
+}
+
+export function notifyUserInputActivity(): void {
+  if (!typingState.isActive) return;
+
+  if (!typingState.keyboardGateEnabled) {
+    requestAutoPause('user-input');
+    return;
+  }
+
+  if (typingState.isResuming) {
+    typingState.cancelResume();
+    mainWindow?.webContents.send('resume-countdown', null);
+    overlayWindow?.webContents.send('resume-countdown', null);
+  }
+
+  if (typingState.isPaused && typingState.pauseReason === 'auto') {
+    resumeFromPause('keyboard-activity');
+    return;
+  }
+
+  armKeyboardGateTimer();
 }
 
 function createMainWindow() {
@@ -174,6 +269,17 @@ function setOverlayExpanded(expanded: boolean) {
   }
 }
 
+function emergencyStopAndQuit() {
+  console.log('[Main] Emergency stop triggered');
+  stopTyping();
+  typingState.reset();
+  broadcastState();
+  mainWindow?.close();
+  overlayWindow?.close();
+  app.quit();
+  setTimeout(() => app.exit(0), 200);
+}
+
 app.whenReady().then(() => {
   createMainWindow();
 
@@ -233,8 +339,10 @@ app.whenReady().then(() => {
 
     // Set typing state to active
     typingState.isActive = true;
-    typingState.isPaused = false;
+    setSessionKeyboardGate(options);
+    typingState.isPaused = typingState.keyboardGateEnabled;
     typingState.isResuming = false;
+    typingState.pauseReason = typingState.isPaused ? 'auto' : 'none';
 
     // Broadcast initial state
     broadcastState();
@@ -260,7 +368,7 @@ app.whenReady().then(() => {
   });
 
   // Config & State
-  ipcMain.on('set-config', (event, config) => {
+  ipcMain.handle('set-config', async (_event, config) => {
     currentConfig = config;
   });
 
@@ -279,6 +387,10 @@ app.whenReady().then(() => {
   // Overlay expand/collapse
   ipcMain.on('set-overlay-expanded', (event, expanded: boolean) => {
     setOverlayExpanded(expanded);
+  });
+
+  ipcMain.handle('emergency-stop', async () => {
+    emergencyStopAndQuit();
   });
 
   // Unified Start (from Overlay)
@@ -302,8 +414,10 @@ app.whenReady().then(() => {
 
     // Set typing state to active
     typingState.isActive = true;
-    typingState.isPaused = false;
+    setSessionKeyboardGate(currentConfig.options);
+    typingState.isPaused = typingState.keyboardGateEnabled;
     typingState.isResuming = false;
+    typingState.pauseReason = typingState.isPaused ? 'auto' : 'none';
 
     // Broadcast initial state
     broadcastState();
@@ -359,6 +473,8 @@ app.whenReady().then(() => {
 
     // Set paused state
     typingState.isPaused = true;
+    typingState.pauseReason = 'manual';
+    clearKeyboardGateTimer();
     console.log('[Main] Typing PAUSED');
     broadcastState();
   });
@@ -402,21 +518,10 @@ app.whenReady().then(() => {
       }
     }
 
-    // Actually resume
-    typingState.isPaused = false;
-    typingState.isResuming = false;
-    console.log('[Main] Typing RESUMED - unblocking executor');
-
-    // Unblock the executor
-    if (typingState.pauseResolve) {
-      typingState.pauseResolve();
-      typingState.pauseResolve = null;
-    }
-
-    // Clear countdown and broadcast new state
+    // Clear countdown and resume
     mainWindow?.webContents.send('resume-countdown', null);
     overlayWindow?.webContents.send('resume-countdown', null);
-    broadcastState();
+    resumeFromPause('manual');
   });
 
   // Get pause state - always returns current authoritative state

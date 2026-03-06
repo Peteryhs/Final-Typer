@@ -1,23 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import {
-    Box, Paper, Typography, Stack, Button, TextField,
+    Box, Paper, Typography, Stack, Button,
     Slider, Switch, Collapse, Divider
 } from '@mui/material';
 import {
-    AutoAwesome, Tune, AccessTime, ErrorOutline,
+    AccessTime, ErrorOutline,
     Science, ExpandLess, ExpandMore, PlayArrow, Pause,
-    Speed, Psychology, Create, Refresh, Verified
+    Speed, Psychology, Create, Refresh
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
 import type { TypingAdvancedSettings } from '../lib/typing/types';
 
 interface ConfigPanelProps {
-    configMode: 'smart' | 'custom';
-    setConfigMode: (mode: 'smart' | 'custom') => void;
-    targetMinutes: number;
-    setTargetMinutes: (min: number) => void;
-    targetSeconds: number;
-    setTargetSeconds: (sec: number) => void;
     speed: number;
     setSpeed: (speed: number) => void;
     speedMode: 'constant' | 'dynamic';
@@ -28,6 +22,8 @@ interface ConfigPanelProps {
     setMistakeRatePercent: (rate: number) => void;
     fatigueMode: boolean;
     setFatigueMode: (mode: boolean) => void;
+    keyboardGateEnabled: boolean;
+    setKeyboardGateEnabled: (enabled: boolean) => void;
     showAdvanced: boolean;
     setShowAdvanced: (show: boolean) => void;
     advanced: TypingAdvancedSettings;
@@ -53,8 +49,20 @@ interface SettingSliderProps {
     description?: string;
 }
 
+function roundToStep(value: number, step: number): number {
+    if (!Number.isFinite(value) || !Number.isFinite(step) || step <= 0) return value;
+    const inv = 1 / step;
+    return Math.round(value * inv) / inv;
+}
+
 function SettingSlider({ label, value, min, max, step, onChange, format, description }: SettingSliderProps) {
-    const displayValue = format ? format(value) : value.toString();
+    const [display, setDisplay] = useState(value);
+
+    useEffect(() => {
+        setDisplay(value);
+    }, [value]);
+
+    const displayValue = format ? format(display) : display.toString();
     return (
         <Box>
             <Stack direction="row" justifyContent="space-between" mb={0.5}>
@@ -63,11 +71,19 @@ function SettingSlider({ label, value, min, max, step, onChange, format, descrip
             </Stack>
             <Slider
                 size="small"
-                value={value}
+                key={value}
+                defaultValue={value}
                 min={min}
                 max={max}
                 step={step}
-                onChange={(_, v) => onChange(v as number)}
+                onChange={(_, v) => {
+                    setDisplay(roundToStep(v as number, step));
+                }}
+                onChangeCommitted={(_, v) => {
+                    const next = roundToStep(v as number, step);
+                    setDisplay(next);
+                    onChange(next);
+                }}
                 sx={{ height: 3, py: 0 }}
             />
             {description && (
@@ -166,14 +182,12 @@ function CollapsibleSection({ icon: Icon, title, subtitle, isOpen, onToggle, chi
 
 export default function ConfigPanel(props: ConfigPanelProps) {
     const {
-        configMode, setConfigMode,
-        targetMinutes, setTargetMinutes,
-        targetSeconds, setTargetSeconds,
         speed, setSpeed,
         speedMode, setSpeedMode,
         speedVariance, setSpeedVariance,
         mistakeRatePercent, setMistakeRatePercent,
         setFatigueMode, // Not used directly in this component
+        keyboardGateEnabled, setKeyboardGateEnabled,
         showAdvanced, setShowAdvanced,
         advanced, setAdvanced,
         handleStart, handlePauseResume, text, isTyping, isPaused,
@@ -186,6 +200,21 @@ export default function ConfigPanel(props: ConfigPanelProps) {
 
     const [width, setWidth] = useState(420);
     const [isDragging, setIsDragging] = useState(false);
+    const [humanizationDisplay, setHumanizationDisplay] = useState(mistakeRatePercent);
+    const [speedDisplay, setSpeedDisplay] = useState(speed);
+    const [speedVarianceDisplay, setSpeedVarianceDisplay] = useState(speedVariance);
+
+    useEffect(() => {
+        setHumanizationDisplay(mistakeRatePercent);
+    }, [mistakeRatePercent]);
+
+    useEffect(() => {
+        setSpeedDisplay(speed);
+    }, [speed]);
+
+    useEffect(() => {
+        setSpeedVarianceDisplay(speedVariance);
+    }, [speedVariance]);
 
     // Track which advanced sections are expanded
     const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -195,7 +224,6 @@ export default function ConfigPanel(props: ConfigPanelProps) {
         recovery: false,
         hindsight: false,
         wordswap: false,
-        integrity: false,
     });
 
     const toggleSection = (key: string) => {
@@ -315,212 +343,109 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                             animate="show"
                             spacing={1.5}
                         >
-                            {/* Mode Selection Card */}
                             <Paper
                                 elevation={0}
                                 sx={{
-                                    p: 0.5,
-                                    bgcolor: 'rgba(0,0,0,0.2)',
+                                    p: 1.5,
+                                    bgcolor: 'rgba(255,255,255,0.03)',
                                     borderRadius: 1.5,
-                                    display: 'flex',
-                                    position: 'relative',
-                                    overflow: 'hidden'
+                                    border: '1px solid rgba(255,255,255,0.05)',
+                                    display: 'flex', flexDirection: 'column', gap: 1.5
                                 }}
                             >
-                                {/* Animated Background Pill */}
-                                <Box
-                                    component={motion.div}
-                                    initial={false}
-                                    animate={{
-                                        left: configMode === 'smart' ? 4 : 'calc(50% + 2px)',
-                                    }}
-                                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                                    sx={{
-                                        position: 'absolute',
-                                        top: 4, bottom: 4,
-                                        width: 'calc(50% - 6px)',
-                                        bgcolor: configMode === 'smart' ? 'primary.main' : 'secondary.main',
-                                        borderRadius: 1,
-                                        zIndex: 0
-                                    }}
-                                />
-
-                                <Button
-                                    fullWidth
-                                    disableRipple
-                                    onClick={() => setConfigMode('smart')}
-                                    startIcon={<AutoAwesome sx={{ fontSize: '1rem' }} />}
-                                    sx={{
-                                        zIndex: 1,
-                                        py: 0.75,
-                                        color: configMode === 'smart' ? 'primary.contrastText' : 'text.secondary',
-                                        transition: 'color 0.2s',
-                                        '&:hover': { bgcolor: 'transparent' },
-                                        fontSize: '0.85rem',
-                                        minWidth: 0
-                                    }}
-                                >
-                                    Smart
-                                </Button>
-                                <Button
-                                    fullWidth
-                                    disableRipple
-                                    onClick={() => setConfigMode('custom')}
-                                    startIcon={<Tune sx={{ fontSize: '1rem' }} />}
-                                    sx={{
-                                        zIndex: 1,
-                                        py: 0.75,
-                                        color: configMode === 'custom' ? 'secondary.contrastText' : 'text.secondary',
-                                        transition: 'color 0.2s',
-                                        '&:hover': { bgcolor: 'transparent' },
-                                        fontSize: '0.85rem',
-                                        minWidth: 0
-                                    }}
-                                >
-                                    Custom
-                                </Button>
-                            </Paper>
-
-                            {/* SMART MODE CARD */}
-                            {configMode === 'smart' ? (
-                                <Paper
-                                    elevation={0}
-                                    sx={{
-                                        p: 1.5,
-                                        bgcolor: 'rgba(255,255,255,0.03)',
-                                        borderRadius: 1.5,
-                                        border: '1px solid rgba(255,255,255,0.05)'
-                                    }}
-                                >
-                                    <Typography variant="body2" fontWeight={600} sx={{ mb: 1 }}>
-                                        Target Duration
-                                    </Typography>
-
-                                    <Stack direction="row" spacing={1.5} mb={1.5}>
-                                        <Box sx={{ flex: 1 }}>
-                                            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block', fontSize: '0.65rem' }}>MINUTES</Typography>
-                                            <TextField
-                                                type="number"
-                                                fullWidth
-                                                value={targetMinutes}
-                                                onChange={(e) => setTargetMinutes(Math.max(0, parseInt(e.target.value) || 0))}
-                                                size="small"
-                                                InputProps={{
-                                                    inputProps: { min: 0 },
-                                                    sx: { fontSize: '1rem', fontWeight: 500 }
-                                                }}
-                                                variant="outlined"
-                                            />
-                                        </Box>
-                                        <Box sx={{ flex: 1 }}>
-                                            <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: 'block', fontSize: '0.65rem' }}>SECONDS</Typography>
-                                            <TextField
-                                                type="number"
-                                                fullWidth
-                                                value={targetSeconds}
-                                                onChange={(e) => setTargetSeconds(Math.max(0, Math.min(59, parseInt(e.target.value) || 0)))}
-                                                size="small"
-                                                InputProps={{
-                                                    inputProps: { min: 0, max: 59 },
-                                                    sx: { fontSize: '1rem', fontWeight: 500 }
-                                                }}
-                                                variant="outlined"
-                                            />
+                                <Box>
+                                    <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
+                                        <Typography variant="body2" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                                            <AccessTime sx={{ fontSize: '1rem' }} color={speedMode === 'constant' ? 'primary' : 'secondary'} />
+                                            Target Speed
+                                        </Typography>
+                                        <Box sx={{
+                                            bgcolor: speedMode === 'constant' ? 'primary.main' : 'secondary.main',
+                                            color: 'primary.contrastText',
+                                            px: 1.5, py: 0.25,
+                                            borderRadius: 100,
+                                            fontSize: '0.75rem',
+                                            fontWeight: 700
+                                        }}>
+                                            {Math.round(speedDisplay)} WPM
                                         </Box>
                                     </Stack>
+                                    <Slider
+                                        key={speed}
+                                        defaultValue={speed}
+                                        min={10} max={200} step={1}
+                                        onChange={(_, v) => setSpeedDisplay(v as number)}
+                                        onChangeCommitted={(_, v) => {
+                                            const next = Math.round(v as number);
+                                            setSpeedDisplay(next);
+                                            setSpeed(next);
+                                        }}
+                                        valueLabelDisplay="auto"
+                                        size="small"
+                                        sx={{ color: speedMode === 'constant' ? 'primary.main' : 'secondary.main', height: 3, py: 0 }}
+                                    />
+                                </Box>
 
-                                    <Divider sx={{ my: 1, borderColor: 'rgba(255,255,255,0.1)' }} />
+                                <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
 
-                                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <Box>
+                                    <Stack direction="row" justifyContent="space-between" alignItems="center">
                                         <Box>
-                                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.75rem' }}>Calculated Speed</Typography>
+                                            <Typography variant="body2" fontWeight={600}>Natural Variation</Typography>
+                                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>Simulate human speed drift</Typography>
                                         </Box>
-                                        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 0.5 }}>
-                                            <Typography variant="h6" color="primary.main" fontWeight={700}>
-                                                {speed}
-                                            </Typography>
-                                            <Typography variant="caption" color="text.secondary">WPM</Typography>
-                                        </Box>
-                                    </Box>
-                                </Paper>
-                            ) : (
-                                /* CUSTOM MODE CARD */
-                                <Paper
-                                    elevation={0}
-                                    sx={{
-                                        p: 1.5,
-                                        bgcolor: 'rgba(255,255,255,0.03)',
-                                        borderRadius: 1.5,
-                                        border: '1px solid rgba(255,255,255,0.05)',
-                                        display: 'flex', flexDirection: 'column', gap: 1.5
-                                    }}
-                                >
-                                    {/* Target Speed */}
-                                    <Box>
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-                                            <Typography variant="body2" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                                <AccessTime sx={{ fontSize: '1rem' }} color={speedMode === 'constant' ? 'primary' : 'secondary'} />
-                                                Target Speed
-                                            </Typography>
-                                            <Box sx={{
-                                                bgcolor: speedMode === 'constant' ? 'primary.main' : 'secondary.main',
-                                                color: 'primary.contrastText',
-                                                px: 1.5, py: 0.25,
-                                                borderRadius: 100,
-                                                fontSize: '0.75rem',
-                                                fontWeight: 700
-                                            }}>
-                                                {speed} WPM
-                                            </Box>
-                                        </Stack>
-                                        <Slider
-                                            value={speed}
-                                            min={10} max={200}
-                                            onChange={(_, v) => setSpeed(v as number)}
-                                            valueLabelDisplay="auto"
+                                        <Switch
                                             size="small"
-                                            sx={{ color: speedMode === 'constant' ? 'primary.main' : 'secondary.main', height: 3, py: 0 }}
+                                            checked={speedMode === 'dynamic'}
+                                            onChange={(e) => {
+                                                setSpeedMode(e.target.checked ? 'dynamic' : 'constant');
+                                                if (e.target.checked) setFatigueMode(false);
+                                                else setFatigueMode(true);
+                                            }}
                                         />
-                                    </Box>
+                                    </Stack>
 
-                                    <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
-
-                                    {/* Natural Variation */}
-                                    <Box>
-                                        <Stack direction="row" justifyContent="space-between" alignItems="center">
-                                            <Box>
-                                                <Typography variant="body2" fontWeight={600}>Natural Variation</Typography>
-                                                <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>Simulate human speed drift</Typography>
-                                            </Box>
-                                            <Switch
-                                                size="small"
-                                                checked={speedMode === 'dynamic'}
-                                                onChange={(e) => {
-                                                    setSpeedMode(e.target.checked ? 'dynamic' : 'constant');
-                                                    if (e.target.checked) setFatigueMode(false);
-                                                    else setFatigueMode(true);
+                                    <Collapse in={speedMode === 'dynamic'}>
+                                        <Box sx={{ mt: 1, p: 1.5, bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 1 }}>
+                                            <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
+                                                <Typography variant="caption" color="text.secondary">Variance Intensity</Typography>
+                                                <Typography variant="caption" fontFamily="monospace" fontWeight={700}>+/- {Math.round(speedVarianceDisplay * 100)}%</Typography>
+                                            </Stack>
+                                            <Slider
+                                                key={speedVariance}
+                                                defaultValue={speedVariance}
+                                                min={0} max={0.5} step={0.05}
+                                                onChange={(_, v) => setSpeedVarianceDisplay(roundToStep(v as number, 0.05))}
+                                                onChangeCommitted={(_, v) => {
+                                                    const next = roundToStep(v as number, 0.05);
+                                                    setSpeedVarianceDisplay(next);
+                                                    setSpeedVariance(next);
                                                 }}
+                                                size="small"
+                                                sx={{ color: 'secondary.light', height: 3, py: 0 }}
                                             />
-                                        </Stack>
+                                        </Box>
+                                    </Collapse>
+                                </Box>
 
-                                        <Collapse in={speedMode === 'dynamic'}>
-                                            <Box sx={{ mt: 1, p: 1.5, bgcolor: 'rgba(0,0,0,0.2)', borderRadius: 1 }}>
-                                                <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
-                                                    <Typography variant="caption" color="text.secondary">Variance Intensity</Typography>
-                                                    <Typography variant="caption" fontFamily="monospace" fontWeight={700}>+/- {Math.round(speedVariance * 100)}%</Typography>
-                                                </Stack>
-                                                <Slider
-                                                    value={speedVariance}
-                                                    min={0} max={0.5} step={0.05}
-                                                    onChange={(_, v) => setSpeedVariance(v as number)}
-                                                    size="small"
-                                                    sx={{ color: 'secondary.light', height: 3, py: 0 }}
-                                                />
-                                            </Box>
-                                        </Collapse>
-                                    </Box>
-                                </Paper>
-                            )}
+                                <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
+
+                                <Box>
+                                    <Stack direction="row" justifyContent="space-between" alignItems="center">
+                                        <Box>
+                                            <Typography variant="body2" fontWeight={600}>Type While Keys Active</Typography>
+                                            <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
+                                                Types only during live keyboard activity
+                                            </Typography>
+                                        </Box>
+                                        <Switch
+                                            size="small"
+                                            checked={keyboardGateEnabled}
+                                            onChange={(e) => setKeyboardGateEnabled(e.target.checked)}
+                                        />
+                                    </Stack>
+                                </Box>
+                            </Paper>
 
                             {/* Error Rate Card */}
                             <Paper
@@ -534,7 +459,7 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                             >
                                 <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
                                     <Typography variant="body2" fontWeight={600} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <ErrorOutline sx={{ fontSize: '1rem' }} color="warning" /> Mistake Rate
+                                        <ErrorOutline sx={{ fontSize: '1rem' }} color="warning" /> Humanization Rate
                                     </Typography>
                                     <Box sx={{
                                         bgcolor: 'warning.main',
@@ -544,13 +469,21 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                                         fontSize: '0.75rem',
                                         fontWeight: 700
                                     }}>
-                                        {mistakeRatePercent}%
+                                        {humanizationDisplay.toFixed(1)}%
                                     </Box>
                                 </Stack>
                                 <Slider
-                                    value={mistakeRatePercent}
-                                    min={0} max={20} step={0.5}
-                                    onChange={(_, v) => setMistakeRatePercent(v as number)}
+                                    key={mistakeRatePercent}
+                                    defaultValue={mistakeRatePercent}
+                                    min={0} max={10} step={0.1}
+                                    onChange={(_, v) => {
+                                        setHumanizationDisplay(roundToStep(v as number, 0.1));
+                                    }}
+                                    onChangeCommitted={(_, v) => {
+                                        const next = roundToStep(v as number, 0.1);
+                                        setHumanizationDisplay(next);
+                                        setMistakeRatePercent(next);
+                                    }}
                                     size="small"
                                     sx={{ color: 'warning.main', height: 3, py: 0 }}
                                 />
@@ -617,13 +550,6 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                                                 min={0.5} max={2.0} step={0.1}
                                                 onChange={(v) => setA('pauseScale', v)}
                                                 format={(v) => `x${v}`}
-                                            />
-                                            <SettingSlider
-                                                label="Micro-Pause Chance"
-                                                value={advanced.microPauseChance}
-                                                min={0} max={0.1} step={0.005}
-                                                onChange={(v) => setA('microPauseChance', v)}
-                                                format={(v) => `${Math.round(v * 100)}%`}
                                             />
                                         </CollapsibleSection>
 
@@ -700,24 +626,9 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                                             <SettingSlider
                                                 label="Backspace Delay"
                                                 value={advanced.backspaceDelaySeconds}
-                                                min={0.01} max={0.2} step={0.01}
+                                                min={0.0001} max={0.002} step={0.0001}
                                                 onChange={(v) => setA('backspaceDelaySeconds', v)}
-                                                format={(v) => `${v}s`}
-                                            />
-                                            <SettingSlider
-                                                label="Realization Chance"
-                                                value={advanced.realizationBaseChance}
-                                                min={0} max={0.2} step={0.005}
-                                                onChange={(v) => setA('realizationBaseChance', v)}
-                                                format={(v) => `${Math.round(v * 100)}%`}
-                                                description="Base chance to notice a past mistake"
-                                            />
-                                            <SettingSlider
-                                                label="Realization Growth"
-                                                value={advanced.realizationSensitivity}
-                                                min={0.01} max={0.15} step={0.005}
-                                                onChange={(v) => setA('realizationSensitivity', v)}
-                                                description="How much chance increases per char since error"
+                                                format={(v) => `${(v * 1000).toFixed(1)}ms`}
                                             />
                                             <SettingSlider
                                                 label="Backtrack Chance"
@@ -751,17 +662,11 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                                                 description="Words typed before looking back"
                                             />
                                             <SettingSlider
-                                                label="Max Corrections"
-                                                value={advanced.fixSessionMaxFixes}
-                                                min={4} max={20} step={1}
-                                                onChange={(v) => setA('fixSessionMaxFixes', v)}
-                                            />
-                                            <SettingSlider
                                                 label="Cursor Speed"
                                                 value={advanced.fixSessionCursorMoveDelaySeconds}
-                                                min={0.001} max={0.06} step={0.001}
+                                                min={0.0001} max={0.002} step={0.0001}
                                                 onChange={(v) => setA('fixSessionCursorMoveDelaySeconds', v)}
-                                                format={(v) => `${Math.round(v * 1000)}ms`}
+                                                format={(v) => `${(v * 1000).toFixed(1)}ms`}
                                                 description="Lower = faster, higher = more reliable"
                                             />
                                         </CollapsibleSection>
@@ -795,33 +700,6 @@ export default function ConfigPanel(props: ConfigPanelProps) {
                                             />
                                         </CollapsibleSection>
 
-                                        {/* INTEGRITY CHECK */}
-                                        <CollapsibleSection
-                                            icon={Verified}
-                                            title="Integrity Check"
-                                            subtitle="Final verification and repair"
-                                            isOpen={openSections.integrity}
-                                            onToggle={() => toggleSection('integrity')}
-                                        >
-                                            <SettingToggle
-                                                label="Clipboard Verify"
-                                                description="Use Ctrl+A/C to verify final text"
-                                                checked={advanced.finalVerifyViaClipboard}
-                                                onChange={(v) => setA('finalVerifyViaClipboard', v)}
-                                            />
-                                            <SettingSlider
-                                                label="Max Verify Attempts"
-                                                value={advanced.finalVerifyMaxAttempts}
-                                                min={1} max={10} step={1}
-                                                onChange={(v) => setA('finalVerifyMaxAttempts', v)}
-                                            />
-                                            <SettingToggle
-                                                label="Full Rewrite on Fail"
-                                                description="If verification fails, Ctrl+A and retype"
-                                                checked={advanced.finalRewriteOnMismatch}
-                                                onChange={(v) => setA('finalRewriteOnMismatch', v)}
-                                            />
-                                        </CollapsibleSection>
                                     </Paper>
                                 </Collapse>
                             </Box>

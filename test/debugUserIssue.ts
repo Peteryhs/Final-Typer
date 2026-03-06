@@ -64,9 +64,6 @@ const userConfig = {
     fixSessionPauseMinSeconds: 0.55,
     fixSessionPauseMaxSeconds: 1.35,
     fixSessionCursorMoveDelaySeconds: 0.08,
-    finalVerifyViaClipboard: false,
-    finalVerifyMaxAttempts: 4,
-    finalRewriteOnMismatch: false,
 };
 
 const analysis = textAnalysis(text);

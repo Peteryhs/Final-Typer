@@ -11,16 +11,19 @@ import {
   Settings, ContentPaste, Delete,
   FlashOn, Palette, Monitor,
   DarkMode, LightMode, OpenInFull,
-  BugReport, FileUpload, FileDownload, Code
+  BugReport, FileUpload, FileDownload, Code, PowerSettingsNew, Info
 } from '@mui/icons-material';
 import { textAnalysis, TextAnalysisResult } from './lib/analysis';
 import { estimateTypingSeconds } from './lib/typing/estimate';
-import { solveWpmForTargetSeconds } from './lib/typing/solve';
 import { DEFAULT_ADVANCED_SETTINGS } from './lib/typing/defaults';
+import { prepareTextForTyping } from './lib/textNormalize';
+import { generatePalette, PRESET_COLORS } from './lib/themeGen';
 import { motion, AnimatePresence } from 'framer-motion';
 import TitleBar from './components/TitleBar';
 import ConfigPanel from './components/ConfigPanel';
 import { DebugPanel, useDebugPanel } from './components/DebugPanel';
+
+const clampNumber = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
 // Hook for local storage persistence
 function useStickyState<T>(defaultValue: T, key: string): [T, React.Dispatch<React.SetStateAction<T>>] {
@@ -42,7 +45,10 @@ function useStickyState<T>(defaultValue: T, key: string): [T, React.Dispatch<Rea
     return parsed;
   });
   useEffect(() => {
-    localStorage.setItem(key, JSON.stringify(value));
+    const timeout = setTimeout(() => {
+      localStorage.setItem(key, JSON.stringify(value));
+    }, 120);
+    return () => clearTimeout(timeout);
   }, [key, value]);
 
   // Sync across windows (main <-> overlay)
@@ -63,28 +69,7 @@ function useStickyState<T>(defaultValue: T, key: string): [T, React.Dispatch<Rea
   return [value, setValue];
 }
 
-// Color Palettes Definition
-const colorPalettes: Record<string, {
-  light: { primary: string; secondary: string; background: string; surface: string };
-  dark: { primary: string; secondary: string; background: string; surface: string };
-}> = {
-  violet: {
-    light: { primary: '#6750A4', secondary: '#625B71', background: '#FDF8FD', surface: '#F3EDF7' },
-    dark: { primary: '#D0BCFF', secondary: '#CCC2DC', background: '#141218', surface: '#1D1B20' }
-  },
-  blue: {
-    light: { primary: '#0061A4', secondary: '#535F70', background: '#FDFCFF', surface: '#E1E7EC' },
-    dark: { primary: '#A8C7FA', secondary: '#D6E3FF', background: '#121619', surface: '#1A2026' } // Slate Blue Tint
-  },
-  green: {
-    light: { primary: '#206C2F', secondary: '#526350', background: '#FCFDF6', surface: '#E0E6DE' },
-    dark: { primary: '#8CD699', secondary: '#BCCBBF', background: '#0E1510', surface: '#19211B' } // Deep Green Tint
-  },
-  orange: {
-    light: { primary: '#8B5000', secondary: '#6F5B40', background: '#FFF8F1', surface: '#F0E0CF' },
-    dark: { primary: '#FFB74D', secondary: '#DDC2A1', background: '#18120C', surface: '#241E18' } // Deep Orange/Brown Tint
-  }
-};
+// Dynamic palette – generated from a single hex seed color
 
 // --- OVERLAY COMPONENT ---
 interface OverlayModeProps {
@@ -96,6 +81,7 @@ interface OverlayModeProps {
   speedVariance: number;
   mistakeRatePercent: number;
   fatigueMode: boolean;
+  keyboardGateEnabled: boolean;
   advanced: any;
 }
 
@@ -108,6 +94,7 @@ function OverlayMode({
   speedVariance,
   mistakeRatePercent,
   fatigueMode,
+  keyboardGateEnabled,
   advanced
 }: OverlayModeProps) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -237,19 +224,21 @@ function OverlayMode({
         }
 
         const analysis = textAnalysis(text);
-        const calculatedMistakeRate = mistakeRatePercent / 100;
+        const calculatedHumanizationRate = mistakeRatePercent / 100;
 
-        console.log('Setting config for overlay:', { text: text.slice(0, 50), speed, mistakeRate: calculatedMistakeRate });
+        console.log('Setting config for overlay:', { text: text.slice(0, 50), speed, humanizationRate: calculatedHumanizationRate });
 
         // Set config for overlay mode
-        window.electronAPI.setConfig({
+        await window.electronAPI.setConfig({
           text,
           options: {
             speed,
             speedMode,
             speedVariance,
-            mistakeRate: calculatedMistakeRate,
+            humanizationRate: calculatedHumanizationRate,
+            mistakeRate: calculatedHumanizationRate,
             fatigueMode,
+            keyboardGateEnabled,
             analysis,
             advanced
           }
@@ -273,6 +262,21 @@ function OverlayMode({
 
   const handleBackToMain = () => {
     window.electronAPI.toggleOverlay();
+  };
+
+  const handleEmergencyStop = async () => {
+    try {
+      window.electronAPI.stopTyping();
+      const api = window.electronAPI as ElectronAPI & { emergencyStop?: () => Promise<void> };
+      if (typeof api.emergencyStop === 'function') {
+        await api.emergencyStop();
+      } else {
+        window.electronAPI.close();
+      }
+    } catch (error) {
+      console.error('Emergency stop failed:', error);
+      window.electronAPI.close();
+    }
   };
 
   const collapseTimeout = useRef<NodeJS.Timeout | null>(null);
@@ -422,6 +426,22 @@ function OverlayMode({
               {isTyping ? (isPaused ? <PlayArrow sx={{ fontSize: 20 }} /> : <Pause sx={{ fontSize: 20 }} />) : <PlayArrow sx={{ fontSize: 20 }} />}
             </IconButton>
 
+            <IconButton
+              onClick={handleEmergencyStop}
+              size="small"
+              sx={{
+                bgcolor: 'error.main',
+                color: 'white',
+                width: 36,
+                height: 36,
+                '&:hover': {
+                  bgcolor: 'error.dark',
+                },
+              }}
+            >
+              <PowerSettingsNew sx={{ fontSize: 18 }} />
+            </IconButton>
+
             {/* Open Main Window Button */}
             <IconButton
               onClick={handleBackToMain}
@@ -453,15 +473,25 @@ function App() {
   const [speedVariance, setSpeedVariance] = useStickyState(0.2, 'ft_speed_variance');
   const [mistakeRatePercent, setMistakeRatePercent] = useStickyState(5, 'ft_mistake');
   const [fatigueMode, setFatigueMode] = useStickyState(true, 'ft_fatigue');
+  const [keyboardGateEnabled, setKeyboardGateEnabled] = useStickyState(false, 'ft_keyboard_gate');
 
-  // Theme State
-  const [seedColor, setSeedColor] = useStickyState('violet', 'ft_theme_seed');
+  const [seedColor, setSeedColor] = useStickyState('#7C3AED', 'ft_theme_seed');
   const [mode, setMode] = useStickyState<'light' | 'dark'>('dark', 'ft_theme_mode');
 
-  // Config Mode State
-  const [configMode, setConfigMode] = useStickyState<'smart' | 'custom'>('smart', 'ft_config_mode');
-  const [targetMinutes, setTargetMinutes] = useStickyState(5, 'ft_smart_min');
-  const [targetSeconds, setTargetSeconds] = useStickyState(0, 'ft_smart_sec');
+  // Debounced color picker state (local for instant swatch, debounced for theme)
+  const [pickerColor, setPickerColor] = useState(seedColor);
+  const colorDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setPickerColor(seedColor);
+  }, [seedColor]);
+
+  const handlePickerChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const hex = e.target.value.toUpperCase();
+    setPickerColor(hex);
+    if (colorDebounceRef.current) clearTimeout(colorDebounceRef.current);
+    colorDebounceRef.current = setTimeout(() => setSeedColor(hex), 150);
+  }, [setSeedColor]);
 
   // Advanced State
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -470,11 +500,14 @@ function App() {
   const [stats, setStats] = useState<TextAnalysisResult | null>(null);
   const [isTyping, setIsTyping] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [activeTab, setActiveTab] = useState<'write' | 'settings'>('write');
+  const [activeTab, setActiveTab] = useState<'write' | 'settings' | 'about'>('write');
   const [countdown, setCountdown] = useState<number | null>(null);
 
   // Auto-overlay setting
   const [autoOverlayEnabled, setAutoOverlayEnabled] = useStickyState(true, 'ft_auto_overlay');
+  const [etaCalibrationFactor, setEtaCalibrationFactor] = useStickyState(1.0, 'ft_eta_calibration');
+
+  const simulationText = useMemo(() => prepareTextForTyping(text), [text]);
 
   // Debug Panel State
   const {
@@ -550,37 +583,15 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const res = textAnalysis(text);
+    const res = textAnalysis(simulationText);
     setStats(res);
-  }, [text]);
+  }, [simulationText]);
 
-  // Smart Mode Speed Calculation
-  useEffect(() => {
-    if (configMode === 'smart' && stats && stats.word_count > 0) {
-      const totalSeconds = (targetMinutes * 60) + targetSeconds;
-      if (totalSeconds > 0) {
-        const calculatedMistakeRate = mistakeRatePercent / 100;
-        const baseOptions = {
-          speedMode: 'dynamic' as const,
-          speedVariance: 0.15,
-          mistakeRate: calculatedMistakeRate,
-          fatigueMode,
-          analysis: stats,
-          advanced,
-        };
-        const solved = solveWpmForTargetSeconds(text, baseOptions, totalSeconds, { minWpm: 10, maxWpm: 350 });
-        setSpeed(Math.max(10, Math.min(solved.wpm, 999)));
-        setSpeedMode('dynamic');
-        setSpeedVariance(0.15);
-      }
-    }
-  }, [configMode, stats, targetMinutes, targetSeconds, setSpeed, setSpeedMode, setSpeedVariance, text, mistakeRatePercent, fatigueMode, advanced]);
+  const generatedPalette = useMemo(() => generatePalette(seedColor), [seedColor]);
 
   const theme = useMemo(() => {
-    const palette = colorPalettes[seedColor][mode];
-    // Force Dark mode for Overlay to look cool/unobtrusive
     const appliedMode = isOverlay ? 'dark' : mode;
-    const appliedPalette = isOverlay ? colorPalettes[seedColor].dark : palette;
+    const appliedPalette = isOverlay ? generatedPalette.dark : generatedPalette[mode];
 
     return createTheme({
       palette: {
@@ -658,7 +669,7 @@ function App() {
         MuiSlider: { styleOverrides: { thumb: { width: 20, height: 20 } } },
       },
     });
-  }, [seedColor, mode, isOverlay]);
+  }, [generatedPalette, mode, isOverlay]);
 
   // Early return for Overlay
   if (isOverlay) {
@@ -667,36 +678,49 @@ function App() {
         <CssBaseline />
         <OverlayMode
           stats={stats}
-          textLength={text.length}
-          text={text}
+          textLength={simulationText.length}
+          text={simulationText}
           speed={speed}
           speedMode={speedMode}
           speedVariance={speedVariance}
           mistakeRatePercent={mistakeRatePercent}
           fatigueMode={fatigueMode}
+          keyboardGateEnabled={keyboardGateEnabled}
           advanced={advanced}
         />
       </ThemeProvider>
     );
   }
 
-  const estimate = useMemo(() => {
-    if (!text.trim() || !stats) return null;
-    const calculatedMistakeRate = mistakeRatePercent / 100;
+  const rawEstimate = useMemo(() => {
+    if (!simulationText.trim() || !stats) return null;
+    const calculatedHumanizationRate = mistakeRatePercent / 100;
     return estimateTypingSeconds(
-      text,
+      simulationText,
       {
         speed,
         speedMode,
         speedVariance,
-        mistakeRate: calculatedMistakeRate,
+        humanizationRate: calculatedHumanizationRate,
+        mistakeRate: calculatedHumanizationRate,
         fatigueMode,
         analysis: stats,
         advanced,
       },
       3,
     );
-  }, [text, stats, speed, speedMode, speedVariance, mistakeRatePercent, fatigueMode, advanced]);
+  }, [simulationText, stats, speed, speedMode, speedVariance, mistakeRatePercent, fatigueMode, advanced]);
+
+  const estimate = useMemo(() => {
+    if (!rawEstimate) return null;
+    return {
+      ...rawEstimate,
+      meanSeconds: rawEstimate.meanSeconds * etaCalibrationFactor,
+      minSeconds: rawEstimate.minSeconds * etaCalibrationFactor,
+      maxSeconds: rawEstimate.maxSeconds * etaCalibrationFactor,
+      samples: rawEstimate.samples.map((s) => s * etaCalibrationFactor),
+    };
+  }, [rawEstimate, etaCalibrationFactor]);
 
   const estimatedTimeStr = useMemo(() => {
     const seconds = estimate?.meanSeconds ?? 0;
@@ -708,37 +732,45 @@ function App() {
   }, [estimate]);
 
   const syncConfig = useCallback(() => {
-    if (!text.trim()) return;
-    const analysis = textAnalysis(text);
-    const calculatedMistakeRate = mistakeRatePercent / 100;
-    window.electronAPI.setConfig({
-      text,
+    if (!simulationText.trim() || !stats) return;
+    const calculatedHumanizationRate = mistakeRatePercent / 100;
+    void window.electronAPI.setConfig({
+      text: simulationText,
       options: {
         speed,
         speedMode,
         speedVariance,
-        mistakeRate: calculatedMistakeRate,
+        humanizationRate: calculatedHumanizationRate,
+        mistakeRate: calculatedHumanizationRate,
         fatigueMode,
-        analysis,
+        keyboardGateEnabled,
+        analysis: stats,
         advanced
       }
     });
   }, [
-    text,
+    simulationText,
+    stats,
     speed,
     speedMode,
     speedVariance,
     mistakeRatePercent,
     fatigueMode,
+    keyboardGateEnabled,
     advanced
   ]);
 
   useEffect(() => {
-    syncConfig();
+    const timeout = setTimeout(() => {
+      syncConfig();
+    }, 100);
+    return () => clearTimeout(timeout);
   }, [syncConfig]);
 
   const handleStart = async () => {
-    if (!text.trim()) return;
+    if (!simulationText.trim()) return;
+
+    const sessionStartedAt = Date.now();
 
     setIsTyping(true);
     setIsPaused(false);
@@ -755,22 +787,37 @@ function App() {
       }
     }, 1000);
 
-    const analysis = textAnalysis(text);
-    const calculatedMistakeRate = mistakeRatePercent / 100;
+    const analysis = textAnalysis(simulationText);
+    const calculatedHumanizationRate = mistakeRatePercent / 100;
 
     try {
-      await window.electronAPI.startTyping(text, {
+      await window.electronAPI.startTyping(simulationText, {
         speed,
         speedMode,
         speedVariance,
-        mistakeRate: calculatedMistakeRate,
+        humanizationRate: calculatedHumanizationRate,
+        mistakeRate: calculatedHumanizationRate,
         fatigueMode,
+        keyboardGateEnabled,
         analysis,
         advanced
       });
     } catch (e) {
       console.error(e);
     } finally {
+      const elapsedSeconds = Math.max(0, (Date.now() - sessionStartedAt) / 1000);
+      const baselineEstimateSeconds = rawEstimate?.meanSeconds ?? 0;
+      if (elapsedSeconds >= 20 && baselineEstimateSeconds >= 20) {
+        const observedFactor = elapsedSeconds / baselineEstimateSeconds;
+        if (Number.isFinite(observedFactor) && observedFactor > 0) {
+          const blended = etaCalibrationFactor * 0.75 + observedFactor * 0.25;
+          const nextFactor = clampNumber(blended, 0.75, 3);
+          if (Math.abs(nextFactor - etaCalibrationFactor) > 0.02) {
+            setEtaCalibrationFactor(nextFactor);
+          }
+        }
+      }
+
       setIsTyping(false);
       setCountdown(null);
     }
@@ -869,12 +916,12 @@ function App() {
                       height: 32,
                       borderRadius: 100,
                       justifyContent: 'center',
-                      bgcolor: activeTab === 'write' ? 'rgba(74, 68, 88, 0.6)' : 'transparent', // Active indicator
-                      '&.Mui-selected': { bgcolor: '#4A4458', color: '#E8DEF8' },
-                      '&:hover': { bgcolor: activeTab === 'write' ? '#4A4458' : 'rgba(255,255,255,0.05)' }
+                      bgcolor: activeTab === 'write' ? 'action.selected' : 'transparent',
+                      '&.Mui-selected': { bgcolor: 'action.selected', color: 'primary.main' },
+                      '&:hover': { bgcolor: activeTab === 'write' ? 'action.selected' : 'rgba(255,255,255,0.05)' }
                     }}
                   >
-                    <ListItemIcon sx={{ justifyContent: 'center', minWidth: 0, color: activeTab === 'write' ? '#E8DEF8' : 'text.secondary' }}>
+                    <ListItemIcon sx={{ justifyContent: 'center', minWidth: 0, color: activeTab === 'write' ? 'primary.main' : 'text.secondary' }}>
                       <TextFields fontSize="small" />
                     </ListItemIcon>
                   </ListItemButton>
@@ -897,17 +944,45 @@ function App() {
                       height: 32,
                       borderRadius: 100,
                       justifyContent: 'center',
-                      bgcolor: activeTab === 'settings' ? 'rgba(74, 68, 88, 0.6)' : 'transparent',
-                      '&.Mui-selected': { bgcolor: '#4A4458', color: '#E8DEF8' },
-                      '&:hover': { bgcolor: activeTab === 'settings' ? '#4A4458' : 'rgba(255,255,255,0.05)' }
+                      bgcolor: activeTab === 'settings' ? 'action.selected' : 'transparent',
+                      '&.Mui-selected': { bgcolor: 'action.selected', color: 'primary.main' },
+                      '&:hover': { bgcolor: activeTab === 'settings' ? 'action.selected' : 'rgba(255,255,255,0.05)' }
                     }}
                   >
-                    <ListItemIcon sx={{ justifyContent: 'center', minWidth: 0, color: activeTab === 'settings' ? '#E8DEF8' : 'text.secondary' }}>
+                    <ListItemIcon sx={{ justifyContent: 'center', minWidth: 0, color: activeTab === 'settings' ? 'primary.main' : 'text.secondary' }}>
                       <Settings fontSize="small" />
                     </ListItemIcon>
                   </ListItemButton>
                   <Typography variant="caption" color={activeTab === 'settings' ? 'text.primary' : 'text.secondary'} sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
                     Config
+                  </Typography>
+                </Box>
+              </Tooltip>
+
+              <Tooltip title="About" placement="right">
+                <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                  <ListItemButton
+                    component={motion.div}
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
+                    selected={activeTab === 'about'}
+                    onClick={() => setActiveTab('about')}
+                    sx={{
+                      width: 56,
+                      height: 32,
+                      borderRadius: 100,
+                      justifyContent: 'center',
+                      bgcolor: activeTab === 'about' ? 'action.selected' : 'transparent',
+                      '&.Mui-selected': { bgcolor: 'action.selected', color: 'primary.main' },
+                      '&:hover': { bgcolor: activeTab === 'about' ? 'action.selected' : 'rgba(255,255,255,0.05)' }
+                    }}
+                  >
+                    <ListItemIcon sx={{ justifyContent: 'center', minWidth: 0, color: activeTab === 'about' ? 'primary.main' : 'text.secondary' }}>
+                      <Info fontSize="small" />
+                    </ListItemIcon>
+                  </ListItemButton>
+                  <Typography variant="caption" color={activeTab === 'about' ? 'text.primary' : 'text.secondary'} sx={{ fontWeight: 500, fontSize: '0.75rem' }}>
+                    About
                   </Typography>
                 </Box>
               </Tooltip>
@@ -919,8 +994,8 @@ function App() {
                   onClick={() => setIsDebugOpen(!isDebugOpen)}
                   sx={{
                     color: isDebugOpen ? 'primary.main' : 'text.secondary',
-                    bgcolor: isDebugOpen ? 'rgba(103, 80, 164, 0.2)' : 'transparent',
-                    '&:hover': { bgcolor: 'rgba(103, 80, 164, 0.3)' }
+                    bgcolor: isDebugOpen ? 'action.selected' : 'transparent',
+                    '&:hover': { bgcolor: 'action.hover' }
                   }}
                 >
                   <BugReport fontSize="small" />
@@ -993,7 +1068,7 @@ function App() {
                       <TextField
                         multiline
                         fullWidth
-                        placeholder="Paste or type the text to be simulated..."
+                        placeholder="Paste or type text (Markdown supported)..."
                         value={text}
                         onChange={(e) => setText(e.target.value)}
                         disabled={isTyping}
@@ -1120,12 +1195,6 @@ function App() {
 
                   {/* Config Panel (Right) - Surface Container High */}
                   <ConfigPanel
-                    configMode={configMode}
-                    setConfigMode={setConfigMode}
-                    targetMinutes={targetMinutes}
-                    setTargetMinutes={setTargetMinutes}
-                    targetSeconds={targetSeconds}
-                    setTargetSeconds={setTargetSeconds}
                     speed={speed}
                     setSpeed={setSpeed}
                     speedMode={speedMode}
@@ -1136,6 +1205,8 @@ function App() {
                     setMistakeRatePercent={setMistakeRatePercent}
                     fatigueMode={fatigueMode}
                     setFatigueMode={setFatigueMode}
+                    keyboardGateEnabled={keyboardGateEnabled}
+                    setKeyboardGateEnabled={setKeyboardGateEnabled}
                     showAdvanced={showAdvanced}
                     setShowAdvanced={setShowAdvanced}
                     advanced={advanced}
@@ -1185,7 +1256,7 @@ function App() {
                             onClick={() => setMode('dark')}
                             sx={{
                               p: 2, display: 'flex', alignItems: 'center', gap: 2, cursor: 'pointer',
-                              bgcolor: mode === 'dark' ? (seedColor === 'violet' ? 'rgba(208, 188, 255, 0.08)' : 'rgba(0,0,0,0.2)') : 'transparent',
+                              bgcolor: mode === 'dark' ? 'rgba(255,255,255,0.06)' : 'transparent',
                               borderColor: mode === 'dark' ? 'primary.main' : 'divider',
                               transition: 'all 0.2s'
                             }}
@@ -1212,30 +1283,88 @@ function App() {
                           </Paper>
                         </Stack>
 
-                        <Typography variant="subtitle2" color="text.secondary" mb={2}>Color Scheme</Typography>
-                        <Stack direction="row" spacing={2}>
-                          {Object.entries(colorPalettes).map(([key, pal]) => (
-                            <Tooltip title={key.charAt(0).toUpperCase() + key.slice(1)} key={key}>
+                        <Typography variant="subtitle2" color="text.secondary" mb={2}>Accent Color</Typography>
+
+                        {/* Preset color swatches */}
+                        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1.5, mb: 3 }}>
+                          {PRESET_COLORS.map((preset) => (
+                            <Tooltip title={preset.name} key={preset.hex}>
                               <Box
                                 component={motion.div}
-                                whileHover={{ scale: 1.1 }}
+                                whileHover={{ scale: 1.15 }}
                                 whileTap={{ scale: 0.9 }}
-                                onClick={() => setSeedColor(key)}
+                                onClick={() => setSeedColor(preset.hex)}
                                 sx={{
-                                  width: 48, height: 48, borderRadius: '50%',
-                                  bgcolor: pal[mode].primary,
+                                  width: 36, height: 36, borderRadius: '50%',
+                                  bgcolor: preset.hex,
                                   cursor: 'pointer',
-                                  border: seedColor === key ? `4px solid ${theme.palette.text.primary}` : '2px solid transparent',
-                                  boxShadow: seedColor === key ? '0 0 0 2px ' + pal[mode].background : 'none',
+                                  border: seedColor.toUpperCase() === preset.hex.toUpperCase()
+                                    ? `3px solid ${theme.palette.text.primary}`
+                                    : '2px solid transparent',
+                                  boxShadow: seedColor.toUpperCase() === preset.hex.toUpperCase()
+                                    ? `0 0 0 2px ${theme.palette.background.default}, 0 0 12px ${preset.hex}66`
+                                    : 'none',
                                   transition: 'all 0.2s',
                                   display: 'flex', alignItems: 'center', justifyContent: 'center'
                                 }}
                               >
-                                {seedColor === key && <Box sx={{ width: 12, height: 12, borderRadius: '50%', bgcolor: theme.palette.background.default }} />}
+                                {seedColor.toUpperCase() === preset.hex.toUpperCase() && (
+                                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: 'white', boxShadow: '0 1px 3px rgba(0,0,0,0.4)' }} />
+                                )}
                               </Box>
                             </Tooltip>
                           ))}
-                        </Stack>
+                        </Box>
+
+                        {/* Custom color picker (debounced to avoid lag) */}
+                        <Paper
+                          variant="outlined"
+                          sx={{
+                            p: 2,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 2,
+                            bgcolor: 'rgba(255,255,255,0.03)',
+                          }}
+                        >
+                          <Box
+                            component="label"
+                            sx={{
+                              width: 40,
+                              height: 40,
+                              borderRadius: 2,
+                              bgcolor: pickerColor,
+                              border: '2px solid rgba(255,255,255,0.2)',
+                              cursor: 'pointer',
+                              flexShrink: 0,
+                              position: 'relative',
+                              overflow: 'hidden',
+                              transition: 'box-shadow 0.2s',
+                              '&:hover': { boxShadow: `0 0 16px ${pickerColor}66` },
+                            }}
+                          >
+                            <input
+                              type="color"
+                              value={pickerColor}
+                              onChange={handlePickerChange}
+                              style={{
+                                position: 'absolute',
+                                inset: 0,
+                                width: '100%',
+                                height: '100%',
+                                opacity: 0,
+                                cursor: 'pointer',
+                                border: 'none',
+                              }}
+                            />
+                          </Box>
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="body2" fontWeight={600}>Custom Color</Typography>
+                            <Typography variant="caption" color="text.secondary">
+                              {pickerColor.toUpperCase()} — Click swatch to pick any color
+                            </Typography>
+                          </Box>
+                        </Paper>
 
                       </Paper>
                     </Grid>
@@ -1370,6 +1499,207 @@ function App() {
                             Reset to Defaults
                           </Button>
                         </Stack>
+                      </Paper>
+                    </Grid>
+                  </Grid>
+                </motion.div>
+              )}
+
+              {activeTab === 'about' && (
+                <motion.div
+                  key="about"
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -20 }}
+                  transition={{ duration: 0.2 }}
+                  style={{ position: 'absolute', inset: 0, padding: 48, overflowY: 'auto' }}
+                >
+                  <Box mb={6} sx={{ maxWidth: 800, mx: 'auto' }}>
+                    <Typography variant="h2" gutterBottom>About</Typography>
+                    <Typography variant="body1" color="text.secondary">
+                      Learn more about Final Typer.
+                    </Typography>
+                  </Box>
+
+                  <Grid container spacing={3} sx={{ maxWidth: 800, mx: 'auto' }}>
+                    {/* App Identity Card */}
+                    <Grid size={{ xs: 12 }}>
+                      <Paper
+                        sx={{
+                          p: 4,
+                          bgcolor: 'background.paper',
+                          backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05))',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 3,
+                          textAlign: 'center',
+                        }}
+                      >
+                        <Paper
+                          elevation={0}
+                          sx={{
+                            width: 80,
+                            height: 80,
+                            borderRadius: 4,
+                            bgcolor: 'primary.main',
+                            color: 'primary.contrastText',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontWeight: 'bold',
+                            fontSize: '2rem',
+                            boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+                          }}
+                        >
+                          FT
+                        </Paper>
+                        <Box>
+                          <Typography variant="h4" fontWeight={700} gutterBottom>
+                            Final Typer
+                          </Typography>
+                          <Typography variant="body1" color="text.secondary">
+                            A realistic human typing simulator for Electron.
+                          </Typography>
+                        </Box>
+                      </Paper>
+                    </Grid>
+
+                    {/* Version Card */}
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <Paper
+                        component={motion.div}
+                        whileHover={{ scale: 1.02 }}
+                        sx={{
+                          p: 3,
+                          bgcolor: 'background.paper',
+                          backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05))',
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 1.5,
+                          textAlign: 'center',
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: '50%',
+                            bgcolor: 'action.selected',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Info sx={{ color: 'primary.main', fontSize: 24 }} />
+                        </Box>
+                        <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 2 }}>
+                          Version
+                        </Typography>
+                        <Typography variant="h5" fontWeight={700} fontFamily="monospace">
+                          2.0.0
+                        </Typography>
+                      </Paper>
+                    </Grid>
+
+                    {/* Author Card */}
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <Paper
+                        component={motion.div}
+                        whileHover={{ scale: 1.02 }}
+                        sx={{
+                          p: 3,
+                          bgcolor: 'background.paper',
+                          backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05))',
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 1.5,
+                          textAlign: 'center',
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: '50%',
+                            bgcolor: 'rgba(76, 175, 80, 0.15)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Code sx={{ color: 'success.main', fontSize: 24 }} />
+                        </Box>
+                        <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 2 }}>
+                          Author
+                        </Typography>
+                        <Typography variant="h5" fontWeight={700}>
+                          Peteryhs
+                        </Typography>
+                      </Paper>
+                    </Grid>
+
+                    {/* License Card */}
+                    <Grid size={{ xs: 12, md: 4 }}>
+                      <Paper
+                        component={motion.div}
+                        whileHover={{ scale: 1.02 }}
+                        sx={{
+                          p: 3,
+                          bgcolor: 'background.paper',
+                          backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05))',
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          gap: 1.5,
+                          textAlign: 'center',
+                        }}
+                      >
+                        <Box
+                          sx={{
+                            width: 48,
+                            height: 48,
+                            borderRadius: '50%',
+                            bgcolor: 'rgba(255, 152, 0, 0.15)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          <Palette sx={{ color: 'warning.main', fontSize: 24 }} />
+                        </Box>
+                        <Typography variant="overline" color="text.secondary" sx={{ letterSpacing: 2 }}>
+                          License
+                        </Typography>
+                        <Typography variant="h5" fontWeight={700}>
+                          Apache 2.0
+                        </Typography>
+                      </Paper>
+                    </Grid>
+
+                    {/* Description / Footer */}
+                    <Grid size={{ xs: 12 }}>
+                      <Paper
+                        sx={{
+                          p: 3,
+                          bgcolor: 'background.paper',
+                          backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.05))',
+                          textAlign: 'center',
+                        }}
+                      >
+                        <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                          Final Typer simulates realistic human typing with configurable speed, mistakes,
+                          bursts, fix sessions, and more. Built with Electron, React, and MUI.
+                        </Typography>
+                        <Divider sx={{ my: 2, borderColor: 'rgba(255,255,255,0.08)' }} />
+                        <Typography variant="caption" color="text.disabled">
+                          © 2025 Peteryhs — Licensed under the Apache License, Version 2.0
+                        </Typography>
                       </Paper>
                     </Grid>
                   </Grid>

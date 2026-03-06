@@ -13,10 +13,9 @@
  * 5. All critical operations are logged for debugging
  */
 
-import { clipboard } from 'electron';
 import type { TyperClient } from './typerClient';
 import { escapeSendKeysChar } from './sendKeys';
-import type { TypingPlan, TypingStep, TypingAdvancedSettings } from '../../lib/typing/types';
+import type { TypingPlan, TypingStep } from '../../lib/typing/types';
 
 // ============================================================================
 // Configuration
@@ -63,7 +62,7 @@ interface ExecutorConfig {
 }
 
 const DEFAULT_CONFIG: ExecutorConfig = {
-  debug: true,
+  debug: false,
   minKeyDelayMs: 8, // Reduced from 15ms for faster throughput
   backspaceSettleMs: 30, // Reduced from 50ms
   navigationSettleMs: 25, // Reduced from 45ms
@@ -104,18 +103,13 @@ type KeyName = 'ENTER' | 'BACKSPACE' | 'LEFT' | 'RIGHT' | 'END' | 'HOME' | 'CTRL
 async function checkPauseAndWait(signal: AbortSignal): Promise<void> {
   if (pauseCheckFn) {
     try {
-      console.log('[Executor] Checking pause state...');
       await pauseCheckFn();
-      console.log('[Executor] Pause check completed, continuing...');
     } catch (err) {
       if (err instanceof Error && err.message === 'Aborted') {
-        console.log('[Executor] Pause check was aborted');
         throw err;
       }
       console.error('[Executor] Pause check error:', err);
     }
-  } else {
-    console.log('[Executor] No pause check function available');
   }
 }
 
@@ -297,14 +291,12 @@ async function sendCharacter(
   if (ch === '\t') {
     const ack = await typer.send('{TAB}');
     if (ack !== 'OK') throw new Error('Typer failed sending TAB');
-    await sleepMs(config.minKeyDelayMs, signal);
     return;
   }
 
   const escaped = escapeSendKeysChar(ch);
   const ack = await typer.send(escaped);
   if (ack !== 'OK') throw new Error(`Typer failed sending char ${JSON.stringify(ch)}`);
-  await sleepMs(config.minKeyDelayMs, signal);
 }
 
 async function sendKey(
@@ -378,24 +370,7 @@ async function sendKey(
   }
 
   // Wait for the key to be processed
-  await sleepMs(config.minKeyDelayMs + extraDelayMs, signal);
-}
-
-async function sendCtrlChord(
-  typer: TyperClient,
-  letter: string,
-  config: ExecutorConfig,
-  signal: AbortSignal,
-): Promise<void> {
-  if (signal.aborted) throw new Error('Aborted');
-
-  const key = (letter || '').toLowerCase();
-  if (!/^[a-z]$/.test(key)) throw new Error(`Invalid Ctrl chord: ${letter}`);
-
-  const ack = await typer.send(`^${key}`);
-  if (ack !== 'OK') throw new Error(`Typer failed sending Ctrl+${key.toUpperCase()}`);
-
-  await sleepMs(config.minKeyDelayMs + config.navigationSettleMs, signal);
+  await sleepMs(Math.max(config.minKeyDelayMs, extraDelayMs), signal);
 }
 
 // ============================================================================
@@ -560,9 +535,6 @@ export async function executeTypingPlan(
 
       // Wait for the requested delay (plus a small extra buffer for reliability)
       await sleepSeconds(step.delayAfterSeconds, signal);
-
-      // Add a minimum inter-key delay to prevent key loss
-      await sleepMs(config.minKeyDelayMs, signal);
 
       // Track for double-char detection
       seqCtx.lastTypedChars = [seqCtx.lastTypedChars[1], step.char];
@@ -765,121 +737,4 @@ export async function executeTypingPlan(
   }
 
   return { localTypedText, statistics: stats };
-}
-
-// ============================================================================
-// Clipboard-based Verification and Fix
-// ============================================================================
-
-async function readFocusedInputTextViaClipboard(
-  typer: TyperClient,
-  config: ExecutorConfig,
-  signal: AbortSignal,
-): Promise<string | null> {
-  const prevClipboard = clipboard.readText();
-  const sentinel = `__FINAL_TYPER_SENTINEL__${Date.now()}__`;
-  clipboard.writeText(sentinel);
-  let copied: string | null = null;
-
-  try {
-    // Select all and copy
-    await sendCtrlChord(typer, 'a', config, signal);
-    await sleepMs(60, signal);
-    await sendCtrlChord(typer, 'c', config, signal);
-
-    // Wait for clipboard to update
-    const timeoutMs = 1200;
-    const start = Date.now();
-    while (!signal.aborted && Date.now() - start < timeoutMs) {
-      const val = clipboard.readText();
-      if (val !== sentinel) {
-        copied = val;
-        return val;
-      }
-      await sleepMs(40, signal);
-    }
-    return null;
-  } finally {
-    // Restore previous clipboard if we changed it
-    const now = clipboard.readText();
-    if (now === sentinel || (copied !== null && now === copied)) {
-      clipboard.writeText(prevClipboard);
-    }
-  }
-}
-
-async function rewriteAllBySelectAllTyping(
-  typer: TyperClient,
-  targetText: string,
-  config: ExecutorConfig,
-  signal: AbortSignal,
-): Promise<void> {
-  // Select all (this will replace all content when we type)
-  await sendCtrlChord(typer, 'a', config, signal);
-  await sleepMs(40, signal);
-
-  // Type the target text
-  for (const ch of targetText) {
-    if (signal.aborted) throw new Error('Aborted');
-    if (ch === '\n') {
-      await sendKey(typer, 'ENTER', config, signal);
-    } else {
-      await sendCharacter(typer, ch, config, signal);
-    }
-    await sleepMs(12, signal);
-  }
-}
-
-export async function finalVerifyAndFix(
-  typer: TyperClient,
-  targetText: string,
-  localTypedText: string,
-  adv: TypingAdvancedSettings,
-  signal: AbortSignal,
-  configOverrides?: Partial<ExecutorConfig>,
-): Promise<string> {
-  const config: ExecutorConfig = { ...DEFAULT_CONFIG, ...configOverrides };
-  const normalizeNewlinesOnly = (s: string) => s.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const targetForCompare = normalizeNewlinesOnly(targetText);
-
-  // If our local model already matches, only do clipboard verification when enabled.
-  if (!adv.finalVerifyViaClipboard) {
-    if (localTypedText !== targetText && adv.finalRewriteOnMismatch) {
-      console.log('[Executor] Local mismatch detected, rewriting...');
-      await rewriteAllBySelectAllTyping(typer, targetText, config, signal);
-      return targetText;
-    }
-    return localTypedText;
-  }
-
-  console.log('[Executor] Performing clipboard verification...');
-
-  for (let attempt = 0; attempt < Math.max(1, adv.finalVerifyMaxAttempts); attempt++) {
-    if (signal.aborted) throw new Error('Aborted');
-    await sleepMs(150, signal);
-
-    const actual = await readFocusedInputTextViaClipboard(typer, config, signal);
-    if (actual === null) {
-      console.log('[Executor] Failed to read clipboard, skipping verification');
-      break;
-    }
-
-    const actualForCompare = normalizeNewlinesOnly(actual);
-    if (actualForCompare === targetForCompare) {
-      console.log('[Executor] Clipboard verification successful');
-      return actualForCompare;
-    }
-
-    console.log(`[Executor] Clipboard mismatch (attempt ${attempt + 1}/${adv.finalVerifyMaxAttempts})`);
-    console.log(`[Executor] Expected: "${targetForCompare.slice(0, 60)}..."`);
-    console.log(`[Executor] Got:      "${actualForCompare.slice(0, 60)}..."`);
-
-    if (adv.finalRewriteOnMismatch) {
-      console.log('[Executor] Rewriting all content...');
-      await rewriteAllBySelectAllTyping(typer, targetText, config, signal);
-      return targetText;
-    }
-  }
-
-  return localTypedText;
 }

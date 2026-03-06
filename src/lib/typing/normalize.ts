@@ -65,7 +65,7 @@ export function normalizeAdvancedSettings(input: Partial<TypingAdvancedSettings>
     merged.reflexHesitationMinSeconds,
     10,
   );
-  merged.backspaceDelaySeconds = clamp(toNumberOr(merged.backspaceDelaySeconds, DEFAULT_ADVANCED_SETTINGS.backspaceDelaySeconds), 0.001, 2);
+  merged.backspaceDelaySeconds = clamp(toNumberOr(merged.backspaceDelaySeconds, DEFAULT_ADVANCED_SETTINGS.backspaceDelaySeconds), 0.0001, 0.002);
   merged.realizationBaseChance = clamp(toNumberOr(merged.realizationBaseChance, DEFAULT_ADVANCED_SETTINGS.realizationBaseChance), 0, 1);
   merged.realizationSensitivity = clamp(toNumberOr(merged.realizationSensitivity, DEFAULT_ADVANCED_SETTINGS.realizationSensitivity), 0, 1);
   merged.realizationMinDelayChars = clamp(toNumberOr(merged.realizationMinDelayChars, DEFAULT_ADVANCED_SETTINGS.realizationMinDelayChars), 0, 200);
@@ -110,14 +110,9 @@ export function normalizeAdvancedSettings(input: Partial<TypingAdvancedSettings>
   );
   merged.fixSessionCursorMoveDelaySeconds = clamp(
     toNumberOr(merged.fixSessionCursorMoveDelaySeconds, DEFAULT_ADVANCED_SETTINGS.fixSessionCursorMoveDelaySeconds),
-    0.001, // 1ms minimum
-    0.06,  // 60ms maximum
+    0.0001, // 0.1ms minimum
+    0.002, // 2ms maximum
   );
-
-  // Verification
-  merged.finalVerifyViaClipboard = toBoolOr(merged.finalVerifyViaClipboard, DEFAULT_ADVANCED_SETTINGS.finalVerifyViaClipboard);
-  merged.finalVerifyMaxAttempts = clamp(toNumberOr(merged.finalVerifyMaxAttempts, DEFAULT_ADVANCED_SETTINGS.finalVerifyMaxAttempts), 1, 50);
-  merged.finalRewriteOnMismatch = toBoolOr(merged.finalRewriteOnMismatch, DEFAULT_ADVANCED_SETTINGS.finalRewriteOnMismatch);
 
   return merged;
 }

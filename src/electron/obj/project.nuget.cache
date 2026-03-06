@@ -1,14 +1,14 @@
 {
   "version": 2,
-  "dgSpecHash": "zctvWGw+LrY=",
+  "dgSpecHash": "h1GgxEY+M60=",
   "success": true,
-  "projectFilePath": "C:\\Users\\peter\\Work\\Miscellaneous\\Projects\\Final-Typer\\src\\electron\\Typer.csproj",
+  "projectFilePath": "C:\\Users\\peter\\Work\\Final-Typer\\src\\electron\\Typer.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\peter\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.22\\microsoft.net.illink.tasks.8.0.22.nupkg.sha512",
-    "C:\\Users\\peter\\.nuget\\packages\\microsoft.netcore.app.ref\\8.0.22\\microsoft.netcore.app.ref.8.0.22.nupkg.sha512",
-    "C:\\Users\\peter\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\8.0.22\\microsoft.windowsdesktop.app.ref.8.0.22.nupkg.sha512",
-    "C:\\Users\\peter\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\8.0.22\\microsoft.aspnetcore.app.ref.8.0.22.nupkg.sha512",
-    "C:\\Users\\peter\\.nuget\\packages\\microsoft.netcore.app.host.win-arm64\\8.0.22\\microsoft.netcore.app.host.win-arm64.8.0.22.nupkg.sha512"
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.net.illink.tasks\\9.0.13\\microsoft.net.illink.tasks.9.0.13.nupkg.sha512",
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\9.0.13\\microsoft.netcore.app.runtime.win-x64.9.0.13.nupkg.sha512",
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\9.0.13\\microsoft.windowsdesktop.app.runtime.win-x64.9.0.13.nupkg.sha512",
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\9.0.13\\microsoft.aspnetcore.app.runtime.win-x64.9.0.13.nupkg.sha512",
+    "C:\\Users\\peter\\.nuget\\packages\\microsoft.netcore.app.host.win-x64\\9.0.13\\microsoft.netcore.app.host.win-x64.9.0.13.nupkg.sha512"
   ],
   "logs": []
 }

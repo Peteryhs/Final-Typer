@@ -5,9 +5,9 @@
   "main": "dist-electron/src/electron/main.js",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && tsc -p tsconfig.node.json && vite build && electron-builder --x64 --arm64",
+    "build": "tsc && tsc -p tsconfig.node.json && vite build && electron-builder",
     "preview": "vite preview",
-    "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev\" \"wait-on tcp:5173 && tsc -p tsconfig.node.json && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "electron:dev": "concurrently -k \"cross-env BROWSER=none npm run dev -- --strictPort --port 5173\" \"wait-on tcp:5173 && tsc -p tsconfig.node.json && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
     "test": "tsc -p tsconfig.test.json && node dist-test/test/typingEngine.test.js"
   },
   "build": {
@@ -28,7 +28,22 @@
       "output": "release"
     },
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
     }
   },
   "dependencies": {

@@ -75,6 +75,171 @@ public class Typer {
     private const ushort VK_RIGHT = 0x27;
     private const ushort VK_DOWN = 0x28;
 
+    // Global input hook constants
+    private const int WH_KEYBOARD_LL = 13;
+    private const int WH_MOUSE_LL = 14;
+    private const int WM_KEYDOWN = 0x0100;
+    private const int WM_KEYUP = 0x0101;
+    private const int WM_SYSKEYDOWN = 0x0104;
+    private const int WM_SYSKEYUP = 0x0105;
+    private const int WM_MOUSEMOVE = 0x0200;
+    private const int WM_LBUTTONDOWN = 0x0201;
+    private const int WM_RBUTTONDOWN = 0x0204;
+    private const int WM_MBUTTONDOWN = 0x0207;
+    private const int WM_MOUSEWHEEL = 0x020A;
+    private const int WM_QUIT = 0x0012;
+
+    private const uint LLKHF_INJECTED = 0x00000010;
+    private const uint LLKHF_LOWER_IL_INJECTED = 0x00000002;
+    private const uint LLMHF_INJECTED = 0x00000001;
+    private const uint LLMHF_LOWER_IL_INJECTED = 0x00000002;
+    private static readonly IntPtr SYNTHETIC_INPUT_TAG = new IntPtr(unchecked((long)0x46494E414C545950));
+    private const int USER_INPUT_DEBOUNCE_MS = 250;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT {
+        public int x;
+        public int y;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct KBDLLHOOKSTRUCT {
+        public uint vkCode;
+        public uint scanCode;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSLLHOOKSTRUCT {
+        public POINT pt;
+        public uint mouseData;
+        public uint flags;
+        public uint time;
+        public IntPtr dwExtraInfo;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MSG {
+        public IntPtr hwnd;
+        public uint message;
+        public IntPtr wParam;
+        public IntPtr lParam;
+        public uint time;
+        public POINT pt;
+    }
+
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+    private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, Delegate lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll")]
+    private static extern sbyte GetMessage(out MSG lpMsg, IntPtr hWnd, uint wMsgFilterMin, uint wMsgFilterMax);
+
+    [DllImport("user32.dll")]
+    private static extern bool TranslateMessage([In] ref MSG lpMsg);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr DispatchMessage([In] ref MSG lpmsg);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostThreadMessage(uint idThread, uint Msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr GetModuleHandle(string lpModuleName);
+
+    private static IntPtr keyboardHook = IntPtr.Zero;
+    private static IntPtr mouseHook = IntPtr.Zero;
+    private static LowLevelKeyboardProc keyboardProc = KeyboardHookCallback;
+    private static LowLevelMouseProc mouseProc = MouseHookCallback;
+    private static Thread hookThread;
+    private static uint hookThreadId = 0;
+    private static long lastUserInputTickMs = 0;
+    private static bool blockUserKeyboardInput = false;
+
+    private static void NotifyKeyboardInput() {
+        long now = Environment.TickCount64;
+        long prev = Interlocked.Read(ref lastUserInputTickMs);
+        if (now - prev < USER_INPUT_DEBOUNCE_MS) return;
+        Interlocked.Exchange(ref lastUserInputTickMs, now);
+        Console.Error.WriteLine("USER_KEYBOARD_INPUT");
+    }
+
+    private static IntPtr KeyboardHookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
+        if (nCode >= 0) {
+            int message = wParam.ToInt32();
+            if (message == WM_KEYDOWN || message == WM_SYSKEYDOWN || message == WM_KEYUP || message == WM_SYSKEYUP) {
+                var info = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
+                bool injected =
+                    (info.flags & LLKHF_INJECTED) != 0 ||
+                    (info.flags & LLKHF_LOWER_IL_INJECTED) != 0 ||
+                    info.dwExtraInfo == SYNTHETIC_INPUT_TAG;
+
+                if (!injected && (message == WM_KEYDOWN || message == WM_SYSKEYDOWN)) {
+                    NotifyKeyboardInput();
+                }
+
+                if (!injected && blockUserKeyboardInput) {
+                    return new IntPtr(1);
+                }
+            }
+        }
+        return CallNextHookEx(keyboardHook, nCode, wParam, lParam);
+    }
+
+    private static IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam) {
+        return CallNextHookEx(mouseHook, nCode, wParam, lParam);
+    }
+
+    private static void HookThreadMain() {
+        hookThreadId = GetCurrentThreadId();
+        IntPtr hMod = GetModuleHandle(null);
+
+        keyboardHook = SetWindowsHookEx(WH_KEYBOARD_LL, keyboardProc, hMod, 0);
+        if (keyboardHook == IntPtr.Zero) {
+            Console.Error.WriteLine("HOOK_FAIL:KEYBOARD:" + Marshal.GetLastWin32Error());
+        }
+
+        MSG msg;
+        while (GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {
+            TranslateMessage(ref msg);
+            DispatchMessage(ref msg);
+        }
+
+        if (keyboardHook != IntPtr.Zero) {
+            UnhookWindowsHookEx(keyboardHook);
+            keyboardHook = IntPtr.Zero;
+        }
+    }
+
+    private static void StartUserInputMonitor() {
+        hookThread = new Thread(HookThreadMain);
+        hookThread.IsBackground = true;
+        hookThread.Name = "TyperInputHook";
+        hookThread.Start();
+    }
+
+    private static void StopUserInputMonitor() {
+        if (hookThreadId != 0) {
+            PostThreadMessage(hookThreadId, WM_QUIT, IntPtr.Zero, IntPtr.Zero);
+        }
+        if (hookThread != null && hookThread.IsAlive) {
+            hookThread.Join(300);
+        }
+    }
+
     // Simple key press with minimal delay
     private static void PressKey(ushort vk, bool extended = false) {
         var input = new INPUT[2];
@@ -85,7 +250,7 @@ public class Typer {
         input[0].u.ki.wScan = 0;
         input[0].u.ki.dwFlags = extended ? KEYEVENTF_EXTENDEDKEY : 0;
         input[0].u.ki.time = 0;
-        input[0].u.ki.dwExtraInfo = IntPtr.Zero;
+        input[0].u.ki.dwExtraInfo = SYNTHETIC_INPUT_TAG;
         
         // Key up
         input[1].type = INPUT_KEYBOARD;
@@ -93,7 +258,7 @@ public class Typer {
         input[1].u.ki.wScan = 0;
         input[1].u.ki.dwFlags = KEYEVENTF_KEYUP | (extended ? KEYEVENTF_EXTENDEDKEY : 0);
         input[1].u.ki.time = 0;
-        input[1].u.ki.dwExtraInfo = IntPtr.Zero;
+        input[1].u.ki.dwExtraInfo = SYNTHETIC_INPUT_TAG;
         
         SendInput(2, input, Marshal.SizeOf(typeof(INPUT)));
         Thread.Sleep(3); // Minimal pause after key (was 10ms, reduced for high WPM)
@@ -109,7 +274,7 @@ public class Typer {
         input[0].u.ki.wScan = (ushort)c;
         input[0].u.ki.dwFlags = KEYEVENTF_UNICODE;
         input[0].u.ki.time = 0;
-        input[0].u.ki.dwExtraInfo = IntPtr.Zero;
+        input[0].u.ki.dwExtraInfo = SYNTHETIC_INPUT_TAG;
         
         // Key up
         input[1].type = INPUT_KEYBOARD;
@@ -117,7 +282,7 @@ public class Typer {
         input[1].u.ki.wScan = (ushort)c;
         input[1].u.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
         input[1].u.ki.time = 0;
-        input[1].u.ki.dwExtraInfo = IntPtr.Zero;
+        input[1].u.ki.dwExtraInfo = SYNTHETIC_INPUT_TAG;
         
         SendInput(2, input, Marshal.SizeOf(typeof(INPUT)));
         Thread.Sleep(2); // Minimal pause after char (was 8ms, reduced for high WPM)
@@ -131,21 +296,25 @@ public class Typer {
         input[0].type = INPUT_KEYBOARD;
         input[0].u.ki.wVk = VK_CONTROL;
         input[0].u.ki.dwFlags = 0;
+        input[0].u.ki.dwExtraInfo = SYNTHETIC_INPUT_TAG;
         
         // Key down
         input[1].type = INPUT_KEYBOARD;
         input[1].u.ki.wVk = vk;
         input[1].u.ki.dwFlags = extended ? KEYEVENTF_EXTENDEDKEY : 0;
+        input[1].u.ki.dwExtraInfo = SYNTHETIC_INPUT_TAG;
         
         // Key up
         input[2].type = INPUT_KEYBOARD;
         input[2].u.ki.wVk = vk;
         input[2].u.ki.dwFlags = KEYEVENTF_KEYUP | (extended ? KEYEVENTF_EXTENDEDKEY : 0);
+        input[2].u.ki.dwExtraInfo = SYNTHETIC_INPUT_TAG;
         
         // Ctrl up
         input[3].type = INPUT_KEYBOARD;
         input[3].u.ki.wVk = VK_CONTROL;
         input[3].u.ki.dwFlags = KEYEVENTF_KEYUP;
+        input[3].u.ki.dwExtraInfo = SYNTHETIC_INPUT_TAG;
         
         SendInput(4, input, Marshal.SizeOf(typeof(INPUT)));
         Thread.Sleep(5); // Pause after ctrl combo (was 15ms, reduced for high WPM)
@@ -236,18 +405,30 @@ public class Typer {
 
     [STAThread]
     public static void Main() {
+        blockUserKeyboardInput = string.Equals(
+            Environment.GetEnvironmentVariable("FT_BLOCK_USER_INPUT"),
+            "1",
+            StringComparison.Ordinal
+        );
+
         Console.InputEncoding = Encoding.UTF8;
         Console.OutputEncoding = Encoding.UTF8;
         var stdout = new StreamWriter(Console.OpenStandardOutput(), Encoding.UTF8);
         stdout.AutoFlush = true;
+
+        StartUserInputMonitor();
         
         stdout.WriteLine("READY");
-        
-        string line;
-        while ((line = Console.ReadLine()) != null) {
-            if (line == "__EXIT__") break;
-            if (line == "__PING__") { stdout.WriteLine("OK"); continue; }
-            ProcessCommand(line, stdout);
+
+        try {
+            string line;
+            while ((line = Console.ReadLine()) != null) {
+                if (line == "__EXIT__") break;
+                if (line == "__PING__") { stdout.WriteLine("OK"); continue; }
+                ProcessCommand(line, stdout);
+            }
+        } finally {
+            StopUserInputMonitor();
         }
     }
 }

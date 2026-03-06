@@ -20,8 +20,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('overlay-auto-shown', handler);
     return () => ipcRenderer.removeListener('overlay-auto-shown', handler);
   },
-  setConfig: (config: any) => ipcRenderer.send('set-config', config),
+  setConfig: (config: any) => ipcRenderer.invoke('set-config', config),
   signalStart: () => ipcRenderer.invoke('signal-start'), // Starts using stored config
+  emergencyStop: () => ipcRenderer.invoke('emergency-stop'),
 
   // Typing state & Auto-overlay
   setTypingState: (typing: boolean) => ipcRenderer.send('set-typing-state', typing),

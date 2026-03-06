@@ -9,6 +9,12 @@ import type { TypingOptions, TypingPlan, TypingStep, TypingAdvancedSettings } fr
 
 const clamp = (v: number, min: number, max: number) => Math.min(max, Math.max(min, v));
 
+const resolveHumanizationRate = (options: TypingOptions): number => {
+  const legacyRate = typeof options.mistakeRate === 'number' ? options.mistakeRate : 0;
+  const explicitRate = typeof options.humanizationRate === 'number' ? options.humanizationRate : legacyRate;
+  return clamp(explicitRate, 0, 1);
+};
+
 function pickWeighted(rnd: () => number, weights: Array<{ key: string; w: number }>): string {
   const total = weights.reduce((s, x) => s + Math.max(0, x.w), 0);
   if (total <= 0) return weights[0]?.key ?? '';
@@ -88,16 +94,19 @@ export function createTypingPlan(rawText: string, options: TypingOptions): Typin
     // Stable-ish seed per input, but still varied by time for actual runs.
     ((hashStringToSeed(normalizedText) ^ (Date.now() & 0xffffffff)) >>> 0);
   const rng = createRng(seed);
+  const effectiveMistakeRate = resolveHumanizationRate(options);
+  const effectiveSynonymReplaceChance = clamp(adv.synonymReplaceChance * effectiveMistakeRate, 0, 1);
+  const allowTextManipulationErrors = effectiveMistakeRate > 0;
 
   // Plan word-level synonym substitutions.
   const wordSpans = extractWordSpans(normalizedText);
   const synonymAtStart = new Map<number, { end: number; original: string; typed: string; wordOrdinal: number }>();
-  if (adv.synonymReplaceEnabled && adv.synonymReplaceChance > 0) {
+  if (allowTextManipulationErrors && adv.synonymReplaceEnabled && effectiveSynonymReplaceChance > 0) {
     for (let wi = 0; wi < wordSpans.length; wi++) {
       const span = wordSpans[wi]!;
       const synonyms = BASIC_SYNONYMS[span.lower];
       if (!synonyms || synonyms.length === 0) continue;
-      if (rng.float() >= adv.synonymReplaceChance) continue;
+      if (rng.float() >= effectiveSynonymReplaceChance) continue;
 
       // Pick a synonym that isn't the same spelling.
       const pool = synonyms.filter((s) => s.toLowerCase() !== span.lower);
@@ -227,10 +236,11 @@ export function createTypingPlan(rawText: string, options: TypingOptions): Typin
   };
 
   const sampleBackspaceDelaySeconds = () =>
-    clamp(sampleLogNormalSeconds(adv.backspaceDelaySeconds, 0.18, rng.normal), 0.01, 0.35);
+    clamp(sampleLogNormalSeconds(adv.backspaceDelaySeconds, 0.18, rng.normal), 0.0001, 0.002);
 
   const sampleMicroPauseSeconds = () => {
-    if (rng.float() >= adv.microPauseChance) return 0;
+    const effectiveMicroPauseChance = clamp(adv.microPauseChance * effectiveMistakeRate, 0, 1);
+    if (rng.float() >= effectiveMicroPauseChance) return 0;
     return (adv.microPauseMinSeconds + rng.float() * (adv.microPauseMaxSeconds - adv.microPauseMinSeconds)) * adv.pauseScale;
   };
 
@@ -297,7 +307,7 @@ export function createTypingPlan(rawText: string, options: TypingOptions): Typin
 
   const moveCaretTo = (target: number) => {
     const t = clamp(target, 0, buffer.length);
-    const delay = clamp(adv.fixSessionCursorMoveDelaySeconds, 0.04, 0.15);
+    const delay = clamp(adv.fixSessionCursorMoveDelaySeconds, 0.0001, 0.002);
     const movedAny = caret !== t;
     while (caret < t) pressKey('RIGHT', delay);
     while (caret > t) pressKey('LEFT', delay);
@@ -381,11 +391,13 @@ export function createTypingPlan(rawText: string, options: TypingOptions): Typin
       if (adv.burstEnabled) {
         burstWordsRemaining--;
         if (burstWordsRemaining <= 0) {
-          addPause(
-            adv.burstThinkingPauseMinSeconds +
-            rng.float() * (adv.burstThinkingPauseMaxSeconds - adv.burstThinkingPauseMinSeconds),
-            'burst-break',
-          );
+          if (rng.float() < effectiveMistakeRate) {
+            addPause(
+              adv.burstThinkingPauseMinSeconds +
+              rng.float() * (adv.burstThinkingPauseMaxSeconds - adv.burstThinkingPauseMinSeconds),
+              'burst-break',
+            );
+          }
           burstWordsRemaining = nextBurstLengthWords();
         }
       }
@@ -406,7 +418,7 @@ export function createTypingPlan(rawText: string, options: TypingOptions): Typin
 
   const shouldIntroduceMistake = (ch: string, activeWordLen: number, currentIndex: number): boolean => {
     if (openMistake) return false;
-    const base = clamp(options.mistakeRate, 0, 1);
+    const base = effectiveMistakeRate;
     if (base <= 0) return false;
     if (ch === '\n') return false;
 

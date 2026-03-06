@@ -58,19 +58,16 @@ interface TypingAdvancedOptions {
   fixSessionPauseMinSeconds: number;
   fixSessionPauseMaxSeconds: number;
   fixSessionCursorMoveDelaySeconds: number;
-
-  // Verification
-  finalVerifyViaClipboard: boolean;
-  finalVerifyMaxAttempts: number;
-  finalRewriteOnMismatch: boolean;
 }
 
 interface TypingOptions {
   speed: number;
   speedMode: SpeedMode;
   speedVariance: number;
+  humanizationRate?: number;
   mistakeRate: number;
   fatigueMode: boolean;
+  keyboardGateEnabled?: boolean;
   analysis: import('./lib/analysis').TextAnalysisResult;
   advanced: TypingAdvancedOptions;
 }
@@ -99,8 +96,9 @@ interface ElectronAPI {
   setOverlayExpanded: (expanded: boolean) => void;
   onOverlayCollapsed: (callback: () => void) => () => void;
   onOverlayAutoShown: (callback: () => void) => () => void;
-  setConfig: (config: StoredConfig) => void;
+  setConfig: (config: StoredConfig) => Promise<void>;
   signalStart: () => Promise<void>;
+  emergencyStop: () => Promise<void>;
   minimize: () => void;
   maximize: () => void;
   close: () => void;
